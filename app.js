@@ -317,22 +317,33 @@ function submitRecord(options = {}) {
   if (submittedChanged) alert("This fortnight was previously submitted. The saved record has changed and the fortnight may need to be resubmitted.");
 }
 function workConfirmationFor(date, record) {
-  if (!C.TIME_KEYS.some(key => Boolean(record[key]))) return null;
   const weekday = new Date(`${date}T00:00:00`).getDay();
   const weekend = weekday === 0 || weekday === 6;
   const publicHoliday = record.leaveType === "Public Holiday";
-  if (!weekend && !publicHoliday) return null;
+  const publicHolidayAdditionalEntry = hasMeaningfulTimesheetData(record, true);
+  if ((!shouldConfirmWeekendEntry(date, record)) && (!publicHoliday || !publicHolidayAdditionalEntry)) return null;
   if (weekend && publicHoliday) return {
-    title:"Please confirm this work entry",
-    message:"You have recorded working time on a weekend or public holiday. Please confirm that this is correct."
+    title:"Please confirm this timesheet entry",
+    message:"You have entered timesheet information for a weekend or public holiday. Please confirm that this is correct."
   };
   return weekend ? {
-    title:"Are you working on a weekend?",
-    message:"You have recorded working time on a Saturday or Sunday. Please confirm that this is correct."
+    title:"Please confirm this weekend entry",
+    message:"You have entered timesheet information for a Saturday or Sunday. Please confirm that this is correct."
   } : {
-    title:"Are you working on a public holiday?",
-    message:"You have recorded working time on a public holiday. Please confirm that this is correct."
+    title:"Please confirm this public holiday entry",
+    message:"You have entered timesheet information for a public holiday. Please confirm that this is correct."
   };
+}
+function hasMeaningfulTimesheetData(record, excludeLeaveType = false) {
+  return RECORD_FIELDS.some(key => {
+    if (excludeLeaveType && key === "leaveType") return false;
+    if (key === "attendanceType") return Boolean(record[key] && record[key] !== "Flextime");
+    return Boolean(record[key]);
+  });
+}
+function shouldConfirmWeekendEntry(date, record) {
+  const weekday = new Date(`${date}T00:00:00`).getDay();
+  return (weekday === 0 || weekday === 6) && hasMeaningfulTimesheetData(record);
 }
 function openWorkConfirmation(details) {
   el("workConfirmationTitle").textContent = details.title;
