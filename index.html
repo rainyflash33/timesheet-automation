@@ -41,14 +41,14 @@
       <h2>Other details</h2>
       <div class="form-grid">
         <label>Leave Type<select id="leaveType"></select></label>
-        <label>Leave Hours <input id="leaveHours" inputmode="numeric" placeholder="H:MM"></label>
+        <label>Leave Hours <input id="leaveHours" data-duration data-record-duration inputmode="numeric" placeholder="HMM" aria-describedby="leaveHoursError"><span id="leaveHoursError" class="field-error" role="alert" hidden>Enter digits with minutes from 00 to 59, for example 721.</span></label>
         <label>Attendance Type
           <select id="attendanceType">
             <option value="Flextime" selected>Flextime</option>
             <option value="Senior Officer A/B">Senior Officer A/B</option>
           </select>
         </label>
-        <label>TOIL Hours earned <input id="toilHours" inputmode="numeric" placeholder="H:MM"></label>
+        <label>TOIL Hours earned <input id="toilHours" data-duration data-record-duration inputmode="numeric" placeholder="HMM" aria-describedby="toilHoursError"><span id="toilHoursError" class="field-error" role="alert" hidden>Enter digits with minutes from 00 to 59, for example 130.</span></label>
       </div>
       <div class="record-actions">
         <button id="submitRecord">Submit</button>
@@ -80,8 +80,8 @@
         <p class="muted">Changes recalculate every saved record.</p>
         <div class="form-grid">
           <label>Fortnight start date <input id="fortnightStart" type="date"><span id="fortnightStartError" class="field-error" role="alert" hidden>Fortnight must start on a Thursday.</span></label>
-          <label>Opening Flex Balance <input id="openingFlex" placeholder="H:MM"></label>
-          <label>Opening TOIL Balance <input id="openingToil" placeholder="H:MM"></label>
+          <label>Opening Flex Balance <input id="openingFlex" data-duration data-setting-duration inputmode="decimal" placeholder="HMM" aria-describedby="openingFlexError"><span id="openingFlexError" class="field-error" role="alert" hidden>Enter a duration such as 721 or -130.</span></label>
+          <label>Opening TOIL Balance <input id="openingToil" data-duration data-setting-duration inputmode="numeric" placeholder="HMM" aria-describedby="openingToilError"><span id="openingToilError" class="field-error" role="alert" hidden>Enter digits with minutes from 00 to 59, for example 050.</span></label>
         </div>
         <h3>Standard hours by day</h3>
         <div id="weekdaySettings" class="weekday-grid"></div>

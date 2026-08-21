@@ -63,7 +63,7 @@ function buildUI() {
   }));
   el("leaveType").innerHTML = LEAVE_TYPES.map(value => `<option>${value}</option>`).join("");
   DAY_NAMES.forEach((name, index) => {
-    const label = document.createElement("label"); label.innerHTML = `${name}<input id="standard${index}" placeholder="H:MM">`; el("weekdaySettings").append(label);
+    const label = document.createElement("label"); label.innerHTML = `${name}<input id="standard${index}" data-duration data-setting-duration inputmode="numeric" placeholder="HMM" aria-describedby="standard${index}Error"><span id="standard${index}Error" class="field-error" role="alert" hidden>Use digits such as 721; minutes must be 00–59.</span>`; el("weekdaySettings").append(label);
   });
   el("interruptionInputs").innerHTML = [["interruptionOut", "Time Out"], ["interruptionIn", "Time In"]].map(([id, label]) => `<div class="time-row"><label for="${id}">${label}</label><input id="${id}" class="clock-time" data-interruption-time type="text" inputmode="numeric" maxlength="5" pattern="(?:[01]\\d|2[0-3]):[0-5]\\d" placeholder="HHMM" aria-describedby="${id}Error"><button data-interruption-now="${id}">Now</button><span id="${id}Error" class="time-error" hidden>Enter a valid time from 0000 to 2359.</span></div>`).join("");
   document.querySelectorAll("[data-stamp]").forEach(button => button.addEventListener("click", () => {
@@ -76,7 +76,10 @@ function buildUI() {
     input.addEventListener("input", () => { formatClockInput(input); if (input.dataset.recordTime != null) updateDraft(); });
     input.addEventListener("change", () => { formatClockInput(input, true); if (input.dataset.recordTime != null) updateDraft(); });
   });
-  ["leaveHours", "toilHours"].forEach(id => el(id).addEventListener("input", updateDraft));
+  document.querySelectorAll("[data-duration]").forEach(input => {
+    input.addEventListener("input", () => { setDurationError(input, false); if (input.dataset.recordDuration != null) updateDraft(); });
+    input.addEventListener("change", () => { formatDurationInput(input, true); if (input.dataset.recordDuration != null) updateDraft(); });
+  });
   el("attendanceType").addEventListener("change", updateDraft);
   el("leaveType").addEventListener("change", () => {
     if (el("leaveType").value === "Public Holiday" && !el("leaveHours").value) el("leaveHours").value = state.settings.standardByDay[new Date(`${activeDate}T00:00:00`).getDay()];
@@ -139,6 +142,35 @@ function validateClockInputs(selector) {
   if (invalid.length) invalid[0].focus();
   return invalid.length === 0;
 }
+function normalizeDurationInput(value) {
+  const raw = String(value ?? "").trim();
+  const existing = raw.match(/^(-?)(\d+):([0-5]\d)$/);
+  if (existing) return `${existing[1]}${Number(existing[2])}:${existing[3]}`;
+  const compact = raw.match(/^(-?)(\d{3,})$/) || raw.match(/^(-)(\d{2})$/);
+  if (!compact) return raw;
+  const digits = compact[2], minutes = digits.slice(-2);
+  if (Number(minutes) > 59) return raw;
+  return `${compact[1]}${Number(digits.slice(0, -2))}:${minutes}`;
+}
+function durationIsValid(value) { return /^-?\d+:[0-5]\d$/.test(value); }
+function setDurationError(input, show) {
+  const error = el(`${input.id}Error`);
+  if (error) error.hidden = !show;
+  input.setAttribute("aria-invalid", String(show));
+}
+function formatDurationInput(input, final = false) {
+  const raw = input.value.trim(), normalized = normalizeDurationInput(raw);
+  if (durationIsValid(normalized)) input.value = normalized;
+  const invalid = raw !== "" && !durationIsValid(normalized);
+  setDurationError(input, final && invalid);
+  return raw === "" || !invalid;
+}
+function validateDurationInputs(selector) {
+  const inputs = [...document.querySelectorAll(selector)];
+  const invalid = inputs.filter(input => !formatDurationInput(input, true));
+  if (invalid.length) invalid[0].focus();
+  return invalid.length === 0;
+}
 function readForm() {
   const value = clone(draft);
   RECORD_FIELDS.forEach(key => { if (el(key)) value[key] = el(key).value.trim(); });
@@ -147,6 +179,7 @@ function readForm() {
 function fillForm(value) {
   RECORD_FIELDS.forEach(key => { if (el(key)) el(key).value = value[key] || (key === "attendanceType" ? "Flextime" : ""); });
   document.querySelectorAll("[data-record-time]").forEach(input => setClockError(input, false));
+  document.querySelectorAll("[data-record-duration]").forEach(input => setDurationError(input, false));
 }
 function updateDraft() { draft = readForm(); renderCurrentPreview(); updateActionState(); }
 
@@ -256,6 +289,7 @@ function loadRecord(date, force = false, mode = "new") {
 function submitRecord() {
   if (!fortnightCalculationAllowed()) { setSettingsExpanded(true); alert("Please set the Fortnight Start Date to a Thursday before saving records."); el("fortnightStart").focus(); return; }
   if (!validateClockInputs("[data-record-time]")) return;
+  if (!validateDurationInputs("[data-record-duration]")) return;
   if (interruptionEditorIsDirty()) { alert("Save or cancel the Additional Time Entry before submitting the daily record."); return; }
   const existed = Object.prototype.hasOwnProperty.call(state.records, activeDate);
   if (!editMode && existed) { alert("A record already exists for this date. Use Edit in Timesheet History to change it."); return; }
@@ -438,6 +472,7 @@ function markFortnightSubmitted() {
 function renderSettings() {
   el("fortnightStart").value = state.settings.fortnightStart; el("openingFlex").value = state.settings.openingFlex; el("openingToil").value = state.settings.openingToil;
   state.settings.standardByDay.forEach((value, index) => el(`standard${index}`).value = value);
+  document.querySelectorAll("[data-setting-duration]").forEach(input => setDurationError(input, false));
   originalSettings = settingsSnapshot(); setSettingsStatus(""); updateConfigurationValidity();
 }
 function settingsSnapshot() { return JSON.stringify({ fortnightStart: el("fortnightStart")?.value || "", openingFlex: el("openingFlex")?.value || "", openingToil: el("openingToil")?.value || "", standardByDay: DAY_NAMES.map((_, i) => el(`standard${i}`)?.value || "") }); }
@@ -459,6 +494,7 @@ function saveSettings() {
   const start = el("fortnightStart").value;
   if (!start) { const message = "Fortnight Start Date is required and must be a Thursday."; setSettingsStatus(message, true); alert(message); el("fortnightStart").focus(); return; }
   if (!C.isThursdayISO(start)) { const message = "Fortnight Start Date must be a Thursday."; setSettingsStatus(message, true); alert(message); el("fortnightStart").focus(); return; }
+  if (!validateDurationInputs("[data-setting-duration]")) { setSettingsStatus("Duration minutes must be between 00 and 59.", true); return; }
   const durationInputs = [
     ["Opening Flex Balance", el("openingFlex")], ["Opening TOIL Balance", el("openingToil")],
     ...DAY_NAMES.map((name, i) => [`${name} Standard Hours`, el(`standard${i}`)])

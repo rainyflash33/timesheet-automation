@@ -8,6 +8,7 @@
   window.alert = message => alerts.push(message);
   function assert(condition, message) { if (!condition) throw new Error(message); }
   function input(id, value) { el(id).value = value; el(id).dispatchEvent(new Event("input", { bubbles:true })); }
+  function change(id, value) { input(id, value); el(id).dispatchEvent(new Event("change", { bubbles:true })); }
   function metric(id, label) { return [...el(id).children].find(card => card.querySelector("span")?.textContent === label)?.querySelector("strong")?.textContent; }
   function restore() {
     if (originalStoredValue == null) localStorage.removeItem(STORAGE_KEY); else localStorage.setItem(STORAGE_KEY, originalStoredValue);
@@ -41,6 +42,18 @@
     assert(el("settingsToggle").getAttribute("aria-expanded") === "false", "Settings toggle state is incorrect after save");
     el("settingsToggle").click();
     assert(!el("settingsContent").hidden, "Settings did not expand when its header was clicked");
+
+    const durationCases = [["721","7:21"],["730","7:30"],["700","7:00"],["130","1:30"],["100","1:00"],["050","0:50"],["030","0:30"],["000","0:00"],["1000","10:00"],["1230","12:30"],["-50","-0:50"],["-130","-1:30"],["-721","-7:21"],["7:21","7:21"],["0:50","0:50"],["10:00","10:00"],["-0:50","-0:50"]];
+    durationCases.forEach(([entered, expected]) => assert(normalizeDurationInput(entered) === expected, `${entered} did not normalize to ${expected}`));
+    ["760","165","1260"].forEach(entered => assert(!durationIsValid(normalizeDurationInput(entered)), `${entered} was accepted as a duration`));
+    assert(document.querySelectorAll("[data-duration]").length === 11, "not all duration fields use the shared formatter");
+    change("leaveHours", "721"); assert(el("leaveHours").value === "7:21", "Leave Hours did not format without a leading zero"); input("leaveHours", "");
+    change("openingFlex", "-130"); assert(el("openingFlex").value === "-1:30", "negative Opening Flex did not format"); change("openingFlex", "0:00");
+    change("standard1", "721"); assert(el("standard1").value === "7:21", "weekday Standard Hours did not format");
+    change("toilHours", "760");
+    assert(!el("toilHoursError").hidden, "invalid compact duration did not show its inline error");
+    const beforeInvalidDurationSave = localStorage.getItem(STORAGE_KEY); submitRecord();
+    assert(localStorage.getItem(STORAGE_KEY) === beforeInvalidDurationSave, "invalid compact duration was saved"); input("toilHours", "");
 
     input("startTime", "0900"); input("lunchOut", "1230"); input("lunchIn", "1300"); input("finishTime", "1721");
     assert(el("startTime").value === "09:00", "four-digit Start Work was not formatted");
@@ -134,7 +147,7 @@
     assert(rows.every((top, index) => index === 0 || top > rows[index - 1]), "daily time fields are not vertically ordered");
     if (innerWidth <= 600) assert(Math.round(parseFloat(getComputedStyle(el("fortnightStart")).height)) === 48, "mobile Fortnight Start Date is not 48px high");
     window.scrollTo(0, 0);
-    result.textContent = "PASS: email validation CSV Web Share fallback Thursday validation settings collapse synchronized calculations workflow layout";
+    result.textContent = "PASS: shared compact durations email CSV Thursday validation synchronized calculations workflow mobile layout";
   } catch (error) {
     result.textContent = `FAIL: ${error.message}`;
   } finally { restore(); }
