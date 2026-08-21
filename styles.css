@@ -195,7 +195,7 @@ th, td { padding: 11px 8px; border-bottom: 1px solid #eeeaf2; text-align: left; 
   .settings .form-grid {
     display: grid;
     width: 100%;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: minmax(0, .82fr) repeat(2, minmax(0, 1fr));
     column-gap: 18px;
     row-gap: 14px;
     align-items: start;
@@ -218,6 +218,13 @@ th, td { padding: 11px 8px; border-bottom: 1px solid #eeeaf2; text-align: left; 
     height: 38px;
     min-height: 38px;
     max-height: 38px;
+  }
+  .settings .form-grid #fortnightStart {
+    height: 36px;
+    min-height: 36px;
+    max-height: 36px;
+    padding-top: 7px;
+    padding-bottom: 7px;
   }
 }
 
