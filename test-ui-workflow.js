@@ -62,26 +62,41 @@
     const noWork = emptyRecord();
     const working = {...noWork, startTime:"09:00", finishTime:"12:00"};
     assert(workConfirmationFor("2026-08-21", working) == null, "weekday work incorrectly triggered confirmation");
-    assert(!shouldConfirmWeekendEntry("2026-08-22", noWork), "Saturday without data triggered confirmation");
-    assert(shouldConfirmWeekendEntry("2026-08-22", working), "Saturday work did not trigger confirmation");
-    assert(shouldConfirmWeekendEntry("2026-08-22", {...noWork, leaveType:"Annual", leaveHours:"7:21"}), "Saturday Annual Leave did not trigger confirmation");
-    assert(shouldConfirmWeekendEntry("2026-08-23", {...noWork, leaveType:"Personal (No Certificate)", leaveHours:"7:21"}), "Sunday Personal Leave did not trigger confirmation");
-    assert(shouldConfirmWeekendEntry("2026-08-22", {...noWork, toilHours:"1:00"}), "Saturday TOIL did not trigger confirmation");
-    assert(shouldConfirmWeekendEntry("2026-08-22", {...noWork, attendanceType:"Senior Officer A/B", leaveHours:"1:00"}), "Saturday changed Attendance Type did not trigger confirmation");
-    assert(shouldConfirmWeekendEntry("2026-08-23", {...noWork, afternoonOut:"15:00", afternoonIn:"15:30"}), "Sunday Additional Time Entry did not trigger confirmation");
-    assert(!shouldConfirmWeekendEntry("2026-08-21", {...noWork, leaveType:"Annual", leaveHours:"7:21"}), "weekday Annual Leave triggered weekend confirmation");
+    assert(!hasMeaningfulTimesheetData(noWork), "blank/default record was treated as meaningful");
+    assert(hasMeaningfulTimesheetData(working), "working time was not treated as meaningful");
+    assert(hasMeaningfulTimesheetData({...noWork, leaveType:"Annual", leaveHours:"7:21"}), "Annual Leave was not treated as meaningful");
+    assert(hasMeaningfulTimesheetData({...noWork, toilHours:"1:00"}), "TOIL was not treated as meaningful");
+    assert(hasMeaningfulTimesheetData({...noWork, attendanceType:"Senior Officer A/B"}), "changed Attendance Type was not treated as meaningful");
+    assert(hasMeaningfulTimesheetData({...noWork, afternoonOut:"15:00", afternoonIn:"15:30"}), "Additional Time Entry was not treated as meaningful");
     assert(workConfirmationFor("2026-08-21", {...noWork, leaveType:"Public Holiday", leaveHours:"7:21"})?.title === "Please confirm this public holiday entry", "Public Holiday additional data did not trigger confirmation");
-    const combinedWarning = workConfirmationFor("2026-08-22", {...working, leaveType:"Public Holiday"});
-    assert(combinedWarning?.title === "Please confirm this timesheet entry" && combinedWarning.message.includes("weekend or public holiday"), "combined weekend/Public Holiday warning was not consolidated");
-    loadRecord("2026-08-22", true); change("leaveType", "Annual"); change("leaveHours", "721"); el("submitRecord").click();
-    assert(!el("workConfirmationModal").hidden && !state.records["2026-08-22"], "Other Details saved without weekend confirmation");
+
+    // End-to-end Saturday diagnostic and hard-gate test through the real controls and Submit button.
+    change("recordDate", "2026-08-22"); change("leaveType", "Annual"); change("leaveHours", "721");
+    let candidate = readForm();
+    assert(activeDate === "2026-08-22" && DAY_NAMES[new Date(`${activeDate}T00:00:00`).getDay()] === "Saturday", "Saturday Record Date did not reach submit state");
+    assert(candidate.leaveType === "Annual" && candidate.leaveHours === "7:21" && hasMeaningfulTimesheetData(candidate), "Saturday candidate was not read/normalised correctly");
+    const storageBeforeSaturdaySubmit = JSON.parse(localStorage.getItem(STORAGE_KEY));
+    el("submitRecord").click();
+    assert(!el("workConfirmationModal").hidden, "Saturday Other Details did not open confirmation");
+    assert(state.records["2026-08-22"] === undefined, "Saturday record mutated state before confirmation");
+    assert(storageBeforeSaturdaySubmit.records["2026-08-22"] === undefined && JSON.parse(localStorage.getItem(STORAGE_KEY)).records["2026-08-22"] === undefined, "Saturday record reached localStorage before confirmation");
     modalRect = el("workConfirmationModal").querySelector(".dialog-card").getBoundingClientRect();
     assert(modalRect.left >= 0 && modalRect.right <= innerWidth && modalRect.height <= innerHeight, "work confirmation is not contained by the viewport");
     el("cancelSpecialWork").click();
     assert(el("workConfirmationModal").hidden && el("leaveType").value === "Annual" && el("leaveHours").value === "7:21", "Go Back lost the Other Details draft");
+    assert(state.records["2026-08-22"] === undefined && JSON.parse(localStorage.getItem(STORAGE_KEY)).records["2026-08-22"] === undefined, "Go Back saved the Saturday record");
     el("submitRecord").click(); el("confirmSpecialWork").click();
-    assert(Boolean(state.records["2026-08-22"]), "Confirm did not save the weekend record");
+    assert(Boolean(state.records["2026-08-22"]) && Boolean(JSON.parse(localStorage.getItem(STORAGE_KEY)).records["2026-08-22"]), "Confirm did not save the captured Saturday record");
     delete state.records["2026-08-22"]; save();
+
+    // The same hard gate must hold for Sunday.
+    change("recordDate", "2026-08-23"); change("leaveType", "Annual"); change("leaveHours", "721"); el("submitRecord").click();
+    assert(!el("workConfirmationModal").hidden && state.records["2026-08-23"] === undefined && JSON.parse(localStorage.getItem(STORAGE_KEY)).records["2026-08-23"] === undefined, "Sunday record bypassed confirmation");
+    el("cancelSpecialWork").click();
+    assert(el("leaveType").value === "Annual" && el("leaveHours").value === "7:21" && state.records["2026-08-23"] === undefined, "Sunday Go Back lost the draft or saved it");
+    el("submitRecord").click(); el("confirmSpecialWork").click();
+    assert(Boolean(state.records["2026-08-23"]) && Boolean(JSON.parse(localStorage.getItem(STORAGE_KEY)).records["2026-08-23"]), "Sunday Confirm did not save the record");
+    delete state.records["2026-08-23"]; save();
     loadRecord("2026-08-21", true);
 
     const durationCases = [["721","7:21"],["730","7:30"],["700","7:00"],["130","1:30"],["100","1:00"],["050","0:50"],["030","0:30"],["000","0:00"],["1000","10:00"],["1230","12:30"],["-50","-0:50"],["-130","-1:30"],["-721","-7:21"],["7:21","7:21"],["0:50","0:50"],["10:00","10:00"],["-0:50","-0:50"]];
