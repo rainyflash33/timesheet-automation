@@ -195,7 +195,7 @@ th, td { padding: 11px 8px; border-bottom: 1px solid #eeeaf2; text-align: left; 
   .settings .form-grid {
     display: grid;
     width: 100%;
-    grid-template-columns: minmax(0, .82fr) repeat(2, minmax(0, 1fr));
+    grid-template-columns: .82fr 1fr 1fr;
     column-gap: 18px;
     row-gap: 14px;
     align-items: start;
