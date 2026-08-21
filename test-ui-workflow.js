@@ -16,8 +16,24 @@
     window.alert = originalAlert;
   }
   try {
-    state = clone(defaults); activeDate = todayISO(); viewStart = ""; editMode = false;
+    state = clone(defaults); activeDate = "2026-08-21"; viewStart = ""; editMode = false;
     renderSettings(); loadRecord(activeDate, true);
+
+    assert(!el("welcomeModal").hidden, "welcome disclaimer did not open on page load");
+    assert(el("welcomeModal").textContent.includes("Clocky is for personal use only.") && el("welcomeModal").textContent.includes("Please do not enter any confidential, sensitive, or work-related information."), "welcome disclaimer text is incorrect");
+    let modalRect = el("welcomeModal").querySelector(".dialog-card").getBoundingClientRect();
+    assert(modalRect.left >= 0 && modalRect.right <= innerWidth && modalRect.height <= innerHeight, "welcome disclaimer is not contained by the viewport");
+    el("closeWelcome").click(); assert(el("welcomeModal").hidden, "welcome disclaimer did not close");
+    el("openFeedback").click();
+    assert(!el("feedbackModal").hidden, "Feedback entry point did not open the modal");
+    modalRect = el("feedbackModal").querySelector(".dialog-card").getBoundingClientRect();
+    assert(modalRect.left >= 0 && modalRect.right <= innerWidth && modalRect.height <= innerHeight, "Feedback modal is not contained by the viewport");
+    assert(!el("feedbackModal").textContent.includes("Would you like a reply?"), "removed reply question is still present");
+    assert(prepareFeedback() === "invalid" && !el("feedbackImproveError").hidden && !el("feedbackRatingError").hidden, "Feedback required fields were not validated");
+    input("feedbackImprove", "Make historical navigation faster.");
+    const ratingFour = document.querySelector('[name="feedbackRating"][value="4"]'); ratingFour.checked = true; ratingFour.dispatchEvent(new Event("change", {bubbles:true}));
+    assert(prepareFeedback() === "ready" && el("feedbackStatus").textContent.includes("Sending will be available"), "valid Feedback form was not prepared without sending");
+    el("cancelFeedback").click(); assert(el("feedbackModal").hidden, "Feedback modal did not close");
 
     input("fortnightStart", "2026-08-19");
     assert(!el("fortnightStartError").hidden, "Wednesday validation warning missing");
@@ -147,7 +163,7 @@
     assert(rows.every((top, index) => index === 0 || top > rows[index - 1]), "daily time fields are not vertically ordered");
     if (innerWidth <= 600) assert(Math.round(parseFloat(getComputedStyle(el("fortnightStart")).height)) === 48, "mobile Fortnight Start Date is not 48px high");
     window.scrollTo(0, 0);
-    result.textContent = "PASS: shared compact durations email CSV Thursday validation synchronized calculations workflow mobile layout";
+    result.textContent = "PASS: welcome Feedback shared durations email CSV validation synchronized calculations responsive workflow";
   } catch (error) {
     result.textContent = `FAIL: ${error.message}`;
   } finally { restore(); }

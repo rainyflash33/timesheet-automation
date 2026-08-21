@@ -110,6 +110,14 @@ function buildUI() {
   el("cancelEmail").addEventListener("click", closeEmailModal);
   el("emailModal").addEventListener("click", event => { if (event.target === el("emailModal")) closeEmailModal(); });
   el("emailTo").addEventListener("input", () => { el("emailToError").hidden = true; el("emailTo").removeAttribute("aria-invalid"); });
+  el("closeWelcome").addEventListener("click", closeWelcomeModal);
+  el("openFeedback").addEventListener("click", openFeedbackModal);
+  el("closeFeedback").addEventListener("click", closeFeedbackModal);
+  el("cancelFeedback").addEventListener("click", closeFeedbackModal);
+  el("validateFeedback").addEventListener("click", prepareFeedback);
+  el("feedbackModal").addEventListener("click", event => { if (event.target === el("feedbackModal")) closeFeedbackModal(); });
+  el("feedbackImprove").addEventListener("input", () => { el("feedbackImproveError").hidden = true; el("feedbackImprove").removeAttribute("aria-invalid"); });
+  document.querySelectorAll('[name="feedbackRating"]').forEach(input => input.addEventListener("change", () => { el("feedbackRatingError").hidden = true; }));
   el("markSubmitted").addEventListener("click", markFortnightSubmitted);
   window.addEventListener("beforeunload", event => { if (draftIsDirty() || settingsAreDirty()) { event.preventDefault(); event.returnValue = ""; } });
 }
@@ -564,10 +572,32 @@ async function sendEmailCsv(options = {}) {
   el("emailStatus").textContent = "Your CSV has been saved. Please attach the downloaded CSV to the email before sending.";
   return "fallback";
 }
+function openWelcomeModal() { el("welcomeModal").hidden = false; el("closeWelcome").focus(); }
+function closeWelcomeModal() { el("welcomeModal").hidden = true; }
+function openFeedbackModal() {
+  el("feedbackImproveError").hidden = true; el("feedbackImprove").removeAttribute("aria-invalid");
+  el("feedbackRatingError").hidden = true; el("feedbackStatus").textContent = "";
+  el("feedbackModal").hidden = false; el("feedbackLike").focus();
+}
+function closeFeedbackModal() { el("feedbackModal").hidden = true; }
+function prepareFeedback() {
+  const improvementMissing = !el("feedbackImprove").value.trim();
+  const rating = document.querySelector('[name="feedbackRating"]:checked');
+  el("feedbackImproveError").hidden = !improvementMissing;
+  el("feedbackImprove").setAttribute("aria-invalid", String(improvementMissing));
+  el("feedbackRatingError").hidden = Boolean(rating);
+  if (improvementMissing || !rating) {
+    (improvementMissing ? el("feedbackImprove") : document.querySelector('[name="feedbackRating"]')).focus();
+    return "invalid";
+  }
+  el("feedbackStatus").textContent = "Feedback is ready. Sending will be available after a feedback email address is configured.";
+  return "ready";
+}
 
 buildUI(); renderSettings();
 if (validAnchor()) viewStart = periodFor(todayISO()).start;
 loadRecord(activeDate, true);
+openWelcomeModal();
 if (!validAnchor() && !TEST_MODE) setTimeout(anchorReminder, 0);
 if (TEST_MODE) {
   const testScript = document.createElement("script"); testScript.src = "test-ui-workflow.js"; document.body.append(testScript);
