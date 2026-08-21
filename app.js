@@ -111,6 +111,8 @@ function buildUI() {
   el("emailModal").addEventListener("click", event => { if (event.target === el("emailModal")) closeEmailModal(); });
   el("emailTo").addEventListener("input", () => { el("emailToError").hidden = true; el("emailTo").removeAttribute("aria-invalid"); });
   el("closeWelcome").addEventListener("click", closeWelcomeModal);
+  el("confirmSpecialWork").addEventListener("click", () => { closeWorkConfirmation(); submitRecord({ specialWorkConfirmed:true }); });
+  el("cancelSpecialWork").addEventListener("click", closeWorkConfirmation);
   el("openFeedback").addEventListener("click", openFeedbackModal);
   el("closeFeedback").addEventListener("click", closeFeedbackModal);
   el("cancelFeedback").addEventListener("click", closeFeedbackModal);
@@ -294,7 +296,7 @@ function loadRecord(date, force = false, mode = "new") {
   fillForm(draft); closeInterruptionEditor(); renderInterruptionList(); renderAll();
   return true;
 }
-function submitRecord() {
+function submitRecord(options = {}) {
   if (!fortnightCalculationAllowed()) { setSettingsExpanded(true); alert("Please set the Fortnight Start Date to a Thursday before saving records."); el("fortnightStart").focus(); return; }
   if (!validateClockInputs("[data-record-time]")) return;
   if (!validateDurationInputs("[data-record-duration]")) return;
@@ -305,12 +307,42 @@ function submitRecord() {
   const previous = state.records[activeDate];
   draft = readForm();
   if (!validateInterruptions(draft)) return;
+  const workConfirmation = workConfirmationFor(activeDate, draft);
+  if (workConfirmation && !options.specialWorkConfirmed) { openWorkConfirmation(workConfirmation); return; }
   state.records[activeDate] = clone(draft);
   const submittedChanged = !recordsEqual(previous, draft) && flagSubmittedChange(activeDate);
   if (!save()) { if (previous) state.records[activeDate] = previous; else delete state.records[activeDate]; return; }
   editMode = false; draft = emptyRecord(); originalDraft = clone(draft); fillForm(draft); closeInterruptionEditor(); renderInterruptionList();
   renderAll(); showStatus(existed ? "Changes saved. Later balances have been recalculated." : "Record submitted and added to Timesheet History.");
   if (submittedChanged) alert("This fortnight was previously submitted. The saved record has changed and the fortnight may need to be resubmitted.");
+}
+function workConfirmationFor(date, record) {
+  if (!C.TIME_KEYS.some(key => Boolean(record[key]))) return null;
+  const weekday = new Date(`${date}T00:00:00`).getDay();
+  const weekend = weekday === 0 || weekday === 6;
+  const publicHoliday = record.leaveType === "Public Holiday";
+  if (!weekend && !publicHoliday) return null;
+  if (weekend && publicHoliday) return {
+    title:"Please confirm this work entry",
+    message:"You have recorded working time on a weekend or public holiday. Please confirm that this is correct."
+  };
+  return weekend ? {
+    title:"Are you working on a weekend?",
+    message:"You have recorded working time on a Saturday or Sunday. Please confirm that this is correct."
+  } : {
+    title:"Are you working on a public holiday?",
+    message:"You have recorded working time on a public holiday. Please confirm that this is correct."
+  };
+}
+function openWorkConfirmation(details) {
+  el("workConfirmationTitle").textContent = details.title;
+  el("workConfirmationMessage").textContent = details.message;
+  el("workConfirmationModal").hidden = false;
+  el("confirmSpecialWork").focus();
+}
+function closeWorkConfirmation() {
+  el("workConfirmationModal").hidden = true;
+  el("submitRecord").focus();
 }
 function cancelEdit() {
   if (!editMode) return;

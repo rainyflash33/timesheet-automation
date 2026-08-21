@@ -59,6 +59,27 @@
     el("settingsToggle").click();
     assert(!el("settingsContent").hidden, "Settings did not expand when its header was clicked");
 
+    const noWork = emptyRecord();
+    const working = {...noWork, startTime:"09:00", finishTime:"12:00"};
+    assert(workConfirmationFor("2026-08-21", working) == null, "weekday work incorrectly triggered confirmation");
+    assert(workConfirmationFor("2026-08-22", working)?.title === "Are you working on a weekend?", "Saturday work did not trigger weekend confirmation");
+    assert(workConfirmationFor("2026-08-23", working)?.title === "Are you working on a weekend?", "Sunday work did not trigger weekend confirmation");
+    assert(workConfirmationFor("2026-08-22", noWork) == null, "Saturday without work triggered confirmation");
+    assert(workConfirmationFor("2026-08-21", {...working, leaveType:"Public Holiday"})?.title === "Are you working on a public holiday?", "Public Holiday work did not trigger confirmation");
+    assert(workConfirmationFor("2026-08-21", {...noWork, leaveType:"Public Holiday", leaveHours:"7:21"}) == null, "Public Holiday without work triggered confirmation");
+    const combinedWarning = workConfirmationFor("2026-08-22", {...working, leaveType:"Public Holiday"});
+    assert(combinedWarning?.title === "Please confirm this work entry" && combinedWarning.message.includes("weekend or public holiday"), "combined weekend/Public Holiday warning was not consolidated");
+    loadRecord("2026-08-22", true); input("startTime", "0900"); input("finishTime", "1200"); el("submitRecord").click();
+    assert(!el("workConfirmationModal").hidden && !state.records["2026-08-22"], "weekend record saved without confirmation");
+    modalRect = el("workConfirmationModal").querySelector(".dialog-card").getBoundingClientRect();
+    assert(modalRect.left >= 0 && modalRect.right <= innerWidth && modalRect.height <= innerHeight, "work confirmation is not contained by the viewport");
+    el("cancelSpecialWork").click();
+    assert(el("workConfirmationModal").hidden && el("startTime").value === "09:00" && el("finishTime").value === "12:00", "Go Back lost the weekend draft");
+    el("submitRecord").click(); el("confirmSpecialWork").click();
+    assert(Boolean(state.records["2026-08-22"]), "Confirm did not save the weekend record");
+    delete state.records["2026-08-22"]; save();
+    loadRecord("2026-08-21", true);
+
     const durationCases = [["721","7:21"],["730","7:30"],["700","7:00"],["130","1:30"],["100","1:00"],["050","0:50"],["030","0:30"],["000","0:00"],["1000","10:00"],["1230","12:30"],["-50","-0:50"],["-130","-1:30"],["-721","-7:21"],["7:21","7:21"],["0:50","0:50"],["10:00","10:00"],["-0:50","-0:50"]];
     durationCases.forEach(([entered, expected]) => assert(normalizeDurationInput(entered) === expected, `${entered} did not normalize to ${expected}`));
     ["760","165","1260"].forEach(entered => assert(!durationIsValid(normalizeDurationInput(entered)), `${entered} was accepted as a duration`));
