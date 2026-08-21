@@ -9,7 +9,7 @@ assert.deepEqual([day.morning, day.afternoon, day.daily], [195, 246, 441]);
 day = C.calculateDay({...base, leaveType:"Annual", leaveHours:"1:00"}, 441);
 assert.equal(day.daily, 501);
 day = C.calculateDay({...base, leaveType:"Flex", leaveHours:"0:30"}, 441);
-assert.equal(day.dailyFlex, -30);
+assert.deepEqual([day.daily, day.dailyFlex], [471, 30]);
 assert.equal(C.calculateDay({...base, finishTime:""}, 441).daily, null);
 
 // Regression: blank optional morning interruption must not require Morning In.
@@ -37,6 +37,18 @@ const fullDayAnnualLeave = {
 };
 day = C.calculateDay(fullDayAnnualLeave, 441);
 assert.deepEqual([day.morning, day.afternoon, day.daily, day.dailyFlex], [0, 0, 441, 0]);
+
+// Flex leave contributes effective hours in the same way as approved leave.
+day = C.calculateDay({...fullDayAnnualLeave, leaveType:"Flex"}, 441);
+assert.deepEqual([day.morning, day.afternoon, day.daily, day.dailyFlex], [0, 0, 441, 0]);
+
+const partialWorkPlusFlex = {
+  startTime:"09:00", morningOut:"13:00", morningIn:"", lunchOut:"",
+  lunchIn:"", afternoonOut:"", afternoonIn:"", finishTime:"",
+  leaveType:"Flex", leaveHours:"3:21", toilHours:""
+};
+day = C.calculateDay(partialWorkPlusFlex, 441);
+assert.deepEqual([day.morning, day.afternoon, day.daily, day.dailyFlex], [240, 0, 441, 0]);
 
 day = C.calculateDay({...fullDayAnnualLeave, leaveType:"Public Holiday"}, 441);
 assert.deepEqual([day.morning, day.afternoon, day.daily, day.dailyFlex], [0, 0, 441, 0]);

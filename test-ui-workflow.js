@@ -161,6 +161,15 @@
 
     const rows = [...el("basicFields").children].map(node => node.getBoundingClientRect().top);
     assert(rows.every((top, index) => index === 0 || top > rows[index - 1]), "daily time fields are not vertically ordered");
+    if (innerWidth >= 601 && innerWidth <= 780) {
+      const settingsInputs = [el("fortnightStart"), el("openingFlex"), el("openingToil")];
+      const settingsTops = settingsInputs.map(input => Math.round(input.getBoundingClientRect().top));
+      const settingsWidths = settingsInputs.map(input => Math.round(input.getBoundingClientRect().width));
+      const settingsHeights = settingsInputs.map(input => Math.round(input.getBoundingClientRect().height));
+      assert(new Set(settingsTops).size === 1, "tablet Settings fields are not on the same row");
+      assert(Math.max(...settingsWidths) - Math.min(...settingsWidths) <= 1, "tablet Settings columns are not equal width");
+      assert(Math.max(...settingsHeights) - Math.min(...settingsHeights) <= 1, "tablet Settings inputs are not equal height");
+    }
     if (innerWidth <= 600) assert(Math.round(parseFloat(getComputedStyle(el("fortnightStart")).height)) === 48, "mobile Fortnight Start Date is not 48px high");
     window.scrollTo(0, 0);
     result.textContent = "PASS: welcome Feedback shared durations email CSV validation synchronized calculations responsive workflow";

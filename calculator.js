@@ -66,7 +66,7 @@
     const leave = parseDuration(record.leaveHours);
     const toil = parseDuration(record.toilHours);
     const valid = !morningIncomplete && !afternoonIncomplete && leave != null && toil != null;
-    const daily = valid ? morning + afternoon + (record.leaveType === "Flex" ? -leave : leave) : null;
+    const daily = valid ? morning + afternoon + leave : null;
     const dailyFlex = valid ? daily - standardMinutes - toil : null;
     return { morning, afternoon, daily, dailyFlex, toilEarned: toil, incomplete: !valid };
   }
