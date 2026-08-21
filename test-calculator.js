@@ -50,6 +50,29 @@ const partialWorkPlusFlex = {
 day = C.calculateDay(partialWorkPlusFlex, 441);
 assert.deepEqual([day.morning, day.afternoon, day.daily, day.dailyFlex], [240, 0, 441, 0]);
 
+const eightHourWorkday = {
+  startTime:"09:00", morningOut:"", morningIn:"", lunchOut:"13:00",
+  lunchIn:"14:00", afternoonOut:"", afternoonIn:"", finishTime:"18:00",
+  leaveType:"", leaveHours:"", toilHours:""
+};
+day = C.calculateDay(eightHourWorkday, 441);
+assert.deepEqual([day.daily, day.dailyFlex], [480, 39]);
+
+const flexLeaveDate = "2026-08-20";
+let flexBalances = C.recalculate(
+  {[flexLeaveDate]: {...fullDayAnnualLeave, leaveType:"Flex"}},
+  {...settings, openingFlex:"10:00"}
+);
+assert.deepEqual(
+  [flexBalances[flexLeaveDate].daily, flexBalances[flexLeaveDate].dailyFlex, flexBalances[flexLeaveDate].progressiveFlex],
+  [441, 0, 159]
+);
+flexBalances = C.recalculate(
+  {[flexLeaveDate]: {...fullDayAnnualLeave, leaveType:"Flex"}},
+  {...settings, openingFlex:"0:00"}
+);
+assert.equal(flexBalances[flexLeaveDate].progressiveFlex, -441);
+
 day = C.calculateDay({...fullDayAnnualLeave, leaveType:"Public Holiday"}, 441);
 assert.deepEqual([day.morning, day.afternoon, day.daily, day.dailyFlex], [0, 0, 441, 0]);
 const records = {

@@ -66,6 +66,11 @@
     change("leaveHours", "721"); assert(el("leaveHours").value === "7:21", "Leave Hours did not format without a leading zero"); input("leaveHours", "");
     change("openingFlex", "-130"); assert(el("openingFlex").value === "-1:30", "negative Opening Flex did not format"); change("openingFlex", "0:00");
     change("standard1", "721"); assert(el("standard1").value === "7:21", "weekday Standard Hours did not format");
+    change("leaveType", "Flex"); change("leaveHours", "721");
+    assert(metric("dailyResults", "Daily Hours") === "7:21", "full-day Flex leave did not count toward Daily Hours");
+    assert(metric("dailyResults", "Daily Flex Balance") === "0:00", "full-day Flex leave incorrectly generated Daily Flex");
+    assert(metric("dailyResults", "Progressive Flex Balance") === "-7:21", "full-day Flex leave was not deducted from Progressive Flex");
+    change("leaveType", ""); input("leaveHours", "");
     change("toilHours", "760");
     assert(!el("toilHoursError").hidden, "invalid compact duration did not show its inline error");
     const beforeInvalidDurationSave = localStorage.getItem(STORAGE_KEY); submitRecord();

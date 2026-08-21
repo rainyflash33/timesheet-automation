@@ -84,6 +84,8 @@
     Object.keys(records).sort().forEach(date => {
       const day = calculateDay(records[date], standardFor(date, settings));
       if (day.dailyFlex != null) flex += day.dailyFlex;
+      const flexUsed = records[date].leaveType === "Flex" ? parseDuration(records[date].leaveHours) : 0;
+      if (flexUsed != null) flex -= flexUsed;
       if (day.toilEarned != null) toil += day.toilEarned;
       const used = records[date].leaveType === "Time off in Lieu (TOIL)" ? parseDuration(records[date].leaveHours) : 0;
       if (used != null) toil -= used;
