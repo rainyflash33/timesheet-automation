@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Personal Timesheet</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <main>
+    <header class="hero">
+      <div class="hero-content">
+        <div class="brand-block">
+          <h1>Clocky</h1>
+          <p>Simple Timesheet Tracking</p>
+          <label class="date-label hero-record-date">Record Date <input id="recordDate" type="date" required></label>
+        </div>
+      </div>
+    </header>
+
+    <div id="status" class="status" role="status" aria-live="polite"></div>
+
+    <section id="submissionReminder" class="submission-reminder" hidden>
+      <div><strong id="submissionMessage"></strong><p id="submissionPeriod"></p></div>
+      <button id="markSubmitted">Mark fortnight as submitted</button>
+    </section>
+
+    <section class="card" aria-label="Work times">
+      <h2>Daily Entry</h2>
+      <div id="basicFields" class="basic-time-fields"></div>
+      <button id="toggleInterruptions" class="secondary interruption-toggle">+ Add Additional Time Entry</button>
+      <div id="interruptionEditor" class="interruption-editor" hidden>
+        <h3>Additional Time Entry</h3>
+        <div id="interruptionInputs"></div>
+        <div class="record-actions"><button id="saveInterruption">Save</button><button id="cancelInterruption" class="secondary">Cancel</button></div>
+      </div>
+      <div id="interruptionList" class="interruption-list" hidden></div>
+    </section>
+
+    <section class="card details">
+      <h2>Other details</h2>
+      <div class="form-grid">
+        <label>Leave Type<select id="leaveType"></select></label>
+        <label>Leave Hours <input id="leaveHours" inputmode="numeric" placeholder="H:MM"></label>
+        <label>Attendance Type
+          <select id="attendanceType">
+            <option value="Flextime" selected>Flextime</option>
+            <option value="Senior Officer A/B">Senior Officer A/B</option>
+          </select>
+        </label>
+        <label>TOIL Hours earned <input id="toilHours" inputmode="numeric" placeholder="H:MM"></label>
+      </div>
+      <div class="record-actions">
+        <button id="submitRecord">Submit</button>
+        <button id="cancelEdit" class="secondary" hidden>Cancel Edit</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Calculated for this date</h2>
+      <div id="dailyResults" class="metrics"></div>
+    </section>
+
+    <section class="card">
+      <div class="section-heading summary-heading"><div><div class="summary-title-row"><h2>Fortnight Summary</h2><span id="fortnightStatus" class="period-status"></span></div><p id="periodDates" class="muted"></p></div></div>
+      <div id="fortnightResults" class="metrics"></div>
+    </section>
+
+    <section class="card history-card">
+      <div class="section-heading history-heading"><h2>Timesheet History</h2><button id="exportCsv" class="secondary"><span class="desktop-action-label">Export Fortnight CSV</span><span class="mobile-action-label">Export CSV</span></button><button id="emailCsv" class="secondary"><span class="desktop-action-label">Send CSV by Email</span><span class="mobile-action-label">Send by Email</span></button></div>
+      <div class="table-wrap"><table><thead><tr><th>Date</th><th>Daily hours</th><th>Daily flex</th><th>Flex balance</th><th>TOIL balance</th><th></th></tr></thead><tbody id="recordsBody"></tbody></table></div>
+    </section>
+
+    <section class="card settings">
+      <div id="settingsToggle" class="settings-heading" role="button" tabindex="0" aria-expanded="true" aria-controls="settingsContent">
+        <h2>Settings</h2>
+        <button id="settingsToggleButton" class="settings-toggle" type="button" tabindex="-1" aria-label="Collapse Settings">−</button>
+      </div>
+      <div id="settingsContent">
+        <p class="muted">Changes recalculate every saved record.</p>
+        <div class="form-grid">
+          <label>Fortnight start date <input id="fortnightStart" type="date"><span id="fortnightStartError" class="field-error" role="alert" hidden>Fortnight must start on a Thursday.</span></label>
+          <label>Opening Flex Balance <input id="openingFlex" placeholder="H:MM"></label>
+          <label>Opening TOIL Balance <input id="openingToil" placeholder="H:MM"></label>
+        </div>
+        <h3>Standard hours by day</h3>
+        <div id="weekdaySettings" class="weekday-grid"></div>
+        <div class="record-actions"><button id="saveSettings">Save settings</button><span id="settingsStatus" class="inline-status" role="status" aria-live="polite"></span></div>
+      </div>
+    </section>
+
+    <section class="card historical-timesheets">
+      <h2>Historical Timesheets</h2>
+      <div class="history-filters">
+        <label>Year <select id="filterYear"></select></label>
+        <label>Month <select id="filterMonth"></select></label>
+        <label>Fortnight <select id="viewFortnight"></select></label>
+      </div>
+    </section>
+  </main>
+  <div id="emailModal" class="modal-backdrop" hidden>
+    <section class="email-modal" role="dialog" aria-modal="true" aria-labelledby="emailModalTitle">
+      <div class="section-heading"><h2 id="emailModalTitle">Send Timesheet by Email</h2><button id="closeEmailModal" class="secondary modal-close" type="button" aria-label="Close">×</button></div>
+      <div class="email-form">
+        <label>To:
+          <input id="emailTo" type="email" inputmode="email" autocomplete="email" aria-describedby="emailToError">
+          <span id="emailToError" class="field-error" role="alert" hidden>Enter a valid email address.</span>
+        </label>
+        <label>Subject:
+          <input id="emailSubject" type="text">
+        </label>
+        <label>Message:
+          <textarea id="emailMessage" rows="6"></textarea>
+        </label>
+      </div>
+      <p id="emailStatus" class="status" role="status" aria-live="polite"></p>
+      <div class="modal-actions"><button id="sendEmailCsv" type="button">Send CSV by Email</button><button id="cancelEmail" class="secondary" type="button">Cancel</button></div>
+    </section>
+  </div>
+  <script src="calculator.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
