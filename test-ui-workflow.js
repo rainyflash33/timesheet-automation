@@ -64,6 +64,47 @@
     el("settingsToggle").click();
     assert(!el("settingsContent").hidden, "Settings did not expand when its header was clicked");
 
+    const assertRecordFormCleared = message => {
+      assert(recordsEqual(readForm(), emptyRecord()), `${message}: record fields were not reset`);
+      assert(el("attendanceType").value === "Flextime", `${message}: Attendance Type did not return to Flextime`);
+      assert(el("interruptionEditor").hidden && el("interruptionList").hidden, `${message}: Additional Time Entry UI remained visible`);
+      assert(!el("interruptionOut").value && !el("interruptionIn").value, `${message}: Additional Time Entry editor values remained`);
+      assert(metric("dailyResults", "Daily Hours") === "0:00", `${message}: empty daily preview was not recalculated`);
+    };
+
+    // Clear is a draft-only reset for Daily Entry, Other details, and Additional Time Entries.
+    input("startTime", "0900"); input("finishTime", "1200");
+    el("clearRecord").click();
+    assertRecordFormCleared("Daily Entry only");
+
+    change("leaveType", "Annual"); change("leaveHours", "721"); change("attendanceType", "Senior Officer A/B"); change("toilHours", "100");
+    el("clearRecord").click();
+    assertRecordFormCleared("Other details only");
+
+    input("startTime", "0900"); input("finishTime", "1200"); change("leaveType", "Annual"); change("leaveHours", "421");
+    el("clearRecord").click();
+    assertRecordFormCleared("Daily Entry and Other details");
+
+    input("lunchOut", "1230"); input("lunchIn", "1330");
+    el("toggleInterruptions").click(); input("interruptionOut", "1000"); input("interruptionIn", "1030"); el("saveInterruption").click();
+    assert(!el("interruptionList").hidden && draft.morningOut === "10:00", "Additional Time Entry test setup failed");
+    el("clearRecord").click();
+    assertRecordFormCleared("Additional Time Entry");
+
+    const emptyDraftBeforeClear = JSON.stringify(draft), emptyStorageBeforeClear = localStorage.getItem(STORAGE_KEY);
+    el("clearRecord").click();
+    assert(JSON.stringify(draft) === emptyDraftBeforeClear && localStorage.getItem(STORAGE_KEY) === emptyStorageBeforeClear, "Clear changed an already empty form or storage");
+
+    const preservedRecord = { ...emptyRecord(), startTime:"09:00", finishTime:"12:00", leaveType:"Annual", leaveHours:"4:21" };
+    state.records[activeDate] = clone(preservedRecord); save();
+    const savedRecordBeforeClear = localStorage.getItem(STORAGE_KEY);
+    loadRecord(activeDate, true, "edit");
+    el("clearRecord").click();
+    assertRecordFormCleared("Existing saved record");
+    assert(editMode && recordsEqual(state.records[activeDate], preservedRecord), "Clear modified the saved record in memory or left edit mode");
+    assert(localStorage.getItem(STORAGE_KEY) === savedRecordBeforeClear, "Clear modified the saved record in localStorage");
+    delete state.records[activeDate]; save(); loadRecord(activeDate, true);
+
     const noWork = emptyRecord();
     const working = {...noWork, startTime:"09:00", finishTime:"12:00"};
     assert(workConfirmationFor("2026-08-21", working) == null, "weekday work incorrectly triggered confirmation");

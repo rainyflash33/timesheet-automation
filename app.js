@@ -94,6 +94,7 @@ function buildUI() {
   el("saveInterruption").addEventListener("click", saveInterruption);
   el("cancelInterruption").addEventListener("click", closeInterruptionEditor);
   el("submitRecord").addEventListener("click", submitRecord);
+  el("clearRecord").addEventListener("click", clearRecordForm);
   el("cancelEdit").addEventListener("click", cancelEdit);
   el("saveSettings").addEventListener("click", saveSettings);
   el("settingsToggle").addEventListener("click", () => setSettingsExpanded(el("settingsContent").hidden));
@@ -193,6 +194,18 @@ function fillForm(value) {
   document.querySelectorAll("[data-record-duration]").forEach(input => setDurationError(input, false));
 }
 function updateDraft() { draft = readForm(); renderCurrentPreview(); updateActionState(); }
+
+function clearRecordForm() {
+  const current = readForm();
+  const editorHasData = Boolean(el("interruptionOut").value || el("interruptionIn").value);
+  if (recordsEqual(current, emptyRecord()) && !editorHasData) return;
+  draft = emptyRecord();
+  fillForm(draft);
+  closeInterruptionEditor();
+  renderInterruptionList();
+  renderCurrentPreview();
+  updateActionState();
+}
 
 function openInterruptionEditor(slot = "") {
   editingInterruption = slot;
