@@ -32,7 +32,12 @@
     assert(prepareFeedback() === "invalid" && !el("feedbackImproveError").hidden && !el("feedbackRatingError").hidden, "Feedback required fields were not validated");
     input("feedbackImprove", "Make historical navigation faster.");
     const ratingFour = document.querySelector('[name="feedbackRating"][value="4"]'); ratingFour.checked = true; ratingFour.dispatchEvent(new Event("change", {bubbles:true}));
-    assert(prepareFeedback() === "ready" && el("feedbackStatus").textContent.includes("Sending will be available"), "valid Feedback form was not prepared without sending");
+    let feedbackMailto = "";
+    assert(prepareFeedback({openMailto:url => { feedbackMailto = url; }}) === "opened", "valid Feedback form did not open a mail draft");
+    const decodedFeedbackMailto = decodeURIComponent(feedbackMailto);
+    assert(decodedFeedbackMailto.startsWith("mailto:sharonwong3386@outlook.com?"), "Feedback mail draft has the wrong recipient");
+    assert(decodedFeedbackMailto.includes("subject=Clocky Beta Feedback") && decodedFeedbackMailto.includes("What I like:\nNot provided") && decodedFeedbackMailto.includes("What could be improved:\nMake historical navigation faster.") && decodedFeedbackMailto.includes("Overall experience:\n4/5") && decodedFeedbackMailto.includes("Contact details:\nNot provided"), "Feedback mail draft content is incorrect");
+    assert(el("feedbackStatus").textContent.includes("review and send"), "Feedback status incorrectly claims automatic sending");
     el("cancelFeedback").click(); assert(el("feedbackModal").hidden, "Feedback modal did not close");
 
     input("fortnightStart", "2026-08-19");
@@ -206,14 +211,14 @@
 
     const rows = [...el("basicFields").children].map(node => node.getBoundingClientRect().top);
     assert(rows.every((top, index) => index === 0 || top > rows[index - 1]), "daily time fields are not vertically ordered");
-    if (innerWidth >= 601 && innerWidth <= 780) {
+    if (innerWidth >= 768 && innerWidth <= 1180) {
       const settingsInputs = [el("fortnightStart"), el("openingFlex"), el("openingToil")];
       const settingsTops = settingsInputs.map(input => Math.round(input.getBoundingClientRect().top));
       const settingsWidths = settingsInputs.map(input => Math.round(input.getBoundingClientRect().width));
       const settingsHeights = settingsInputs.map(input => Math.round(input.getBoundingClientRect().height));
       assert(new Set(settingsTops).size === 1, "tablet Settings fields are not on the same row");
-      assert(Math.max(...settingsWidths) - Math.min(...settingsWidths) <= 1, "tablet Settings columns are not equal width");
-      assert(Math.max(...settingsHeights) - Math.min(...settingsHeights) <= 1, "tablet Settings inputs are not equal height");
+      assert(settingsWidths[0] < settingsWidths[1] && Math.abs(settingsWidths[1] - settingsWidths[2]) <= 1, "tablet Settings width proportions are incorrect");
+      assert(settingsHeights[0] === 36 && settingsHeights[1] === 38 && settingsHeights[2] === 38, "tablet Settings input heights are incorrect");
     }
     if (innerWidth <= 600) assert(Math.round(parseFloat(getComputedStyle(el("fortnightStart")).height)) === 48, "mobile Fortnight Start Date is not 48px high");
     window.scrollTo(0, 0);

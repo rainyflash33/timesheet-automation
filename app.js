@@ -643,7 +643,7 @@ function openFeedbackModal() {
   el("feedbackModal").hidden = false; el("feedbackLike").focus();
 }
 function closeFeedbackModal() { el("feedbackModal").hidden = true; }
-function prepareFeedback() {
+function prepareFeedback(options = {}) {
   const improvementMissing = !el("feedbackImprove").value.trim();
   const rating = document.querySelector('[name="feedbackRating"]:checked');
   el("feedbackImproveError").hidden = !improvementMissing;
@@ -653,8 +653,14 @@ function prepareFeedback() {
     (improvementMissing ? el("feedbackImprove") : document.querySelector('[name="feedbackRating"]')).focus();
     return "invalid";
   }
-  el("feedbackStatus").textContent = "Feedback is ready. Sending will be available after a feedback email address is configured.";
-  return "ready";
+  const liked = el("feedbackLike").value.trim() || "Not provided";
+  const improvement = el("feedbackImprove").value.trim();
+  const contact = el("feedbackContact").value.trim() || "Not provided";
+  const message = `What I like:\n${liked}\n\nWhat could be improved:\n${improvement}\n\nOverall experience:\n${rating.value}/5\n\nContact details:\n${contact}`;
+  const url = mailtoUrl("sharonwong3386@outlook.com", "Clocky Beta Feedback", message);
+  if (options.openMailto) options.openMailto(url); else window.location.href = url;
+  el("feedbackStatus").textContent = "Your email app has been opened. Please review and send the feedback when ready.";
+  return "opened";
 }
 
 buildUI(); renderSettings();
