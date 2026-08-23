@@ -100,6 +100,22 @@
     el("settingsToggle").click();
     assert(!el("settingsContent").hidden, "Settings did not expand when its header was clicked");
 
+    const liveEntryDate = activeDate;
+    input("startTime", "0900");
+    assert(!el("status").textContent.includes("Incomplete record"), "Start Work displayed a live incomplete-record warning");
+    const alertsBeforeStartSubmit = alerts.length; el("submitRecord").click();
+    assert(alerts.length === alertsBeforeStartSubmit + 1 && alerts.at(-1).includes("Complete both ends"), "incomplete Start Work was not validated on Submit");
+    assert(activeDate === liveEntryDate && !state.records[liveEntryDate], "incomplete Start Work saved or advanced the date");
+    el("clearRecord").click(); input("lunchOut", "1230");
+    assert(!el("status").textContent.includes("Incomplete record"), "Lunch Out displayed a live incomplete-record warning");
+    el("submitRecord").click();
+    assert(alerts.at(-1).includes("Complete both ends") && activeDate === liveEntryDate && !state.records[liveEntryDate], "incomplete Lunch pair was not blocked at Submit");
+    el("clearRecord").click(); input("lunchOut", "1230"); input("lunchIn", "1300"); el("toggleInterruptions").click(); input("interruptionOut", "1100");
+    assert(!el("status").textContent.includes("Incomplete record"), "partial Additional Time Entry displayed a live incomplete-record warning");
+    el("submitRecord").click();
+    assert(alerts.at(-1).includes("Save or cancel the Additional Time Entry") && activeDate === liveEntryDate && !state.records[liveEntryDate], "partial Additional Time Entry was not blocked at Submit");
+    el("cancelInterruption").click(); el("clearRecord").click();
+
     input("startTime", "0900"); input("lunchOut", "1200"); input("lunchIn", "1300"); input("finishTime", "1721");
     assert(el("leaveToilPanel").hidden, "normal working day unexpectedly expanded Leave / TOIL");
     const normalRecordDate = activeDate;

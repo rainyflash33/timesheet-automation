@@ -346,6 +346,7 @@ function submitRecord() {
   if (C.isSeniorOfficer(candidateRecord.attendanceType) && candidateRecord.leaveType === "Flex") { alert("Flex Leave is not available for Senior Officer A/B attendance records."); el("leaveType").focus(); return; }
   draft = clone(candidateRecord);
   if (!validateInterruptions(candidateRecord)) return;
+  if (!validateRecordCompleteness(candidateRecord)) return;
   const submission = { date:activeDate, candidateRecord:clone(candidateRecord), previous:state.records[activeDate] ? clone(state.records[activeDate]) : null, existed, wasEditMode:editMode };
   if (!guardWeekendSubmission(activeDate, candidateRecord, submission)) return;
   const publicHolidayConfirmation = workConfirmationFor(activeDate, candidateRecord);
@@ -451,6 +452,11 @@ function validateInterruptions(record) {
   }
   return true;
 }
+function validateRecordCompleteness(record) {
+  if (!C.calculateDay(record, C.standardFor(activeDate, state.settings)).incomplete) return true;
+  alert("Complete both ends of each work segment before submitting the record.");
+  return false;
+}
 function deleteRecord(date) {
   const currentDirty = date === activeDate && draftIsDirty();
   const message = currentDirty ? `Delete ${date} and discard its unsaved changes? This cannot be undone.` : `Delete the record for ${date}? This cannot be undone.`;
@@ -508,8 +514,7 @@ function renderCalculations(calc) {
   let day = calc[activeDate];
   if (!day) day = C.recalculate({ ...state.records, [activeDate]: draft }, state.settings)[activeDate];
   metricList("dailyResults", [["Daily Hours", day.daily], [balanceLabels[0], seniorOfficer ? day.dailySog : day.dailyFlex], [balanceLabels[1], seniorOfficer ? day.progressiveSog : day.progressiveFlex], ["Progressive TOIL Balance", day.progressiveToil]]);
-  if (day.incomplete) showStatus("Incomplete record — complete both ends of each work segment you started.");
-  else if (draftIsDirty()) showStatus("Unsaved changes");
+  if (draftIsDirty()) showStatus("Unsaved changes");
   else showStatus("");
 }
 function updateActionState() {
@@ -527,17 +532,17 @@ function renderFortnight(calc, records = state.records) {
     return;
   }
   const period = { start: viewStart, end: C.addDays(viewStart, 13) };
-  let standard = 0, recorded = 0, netBalance = 0, hasIncomplete = false;
+  let standard = 0, recorded = 0, netBalance = 0;
   for (let current = period.start; current <= period.end; current = C.addDays(current, 1)) {
     standard += C.standardFor(current, state.settings);
-    if (records[current]) { const day = calc[current]; if (day.daily == null) hasIncomplete = true; else { recorded += day.daily; if (C.isSeniorOfficer(records[current].attendanceType) === seniorOfficer) netBalance += seniorOfficer ? day.dailySog : day.dailyFlex; } }
+    if (records[current]) { const day = calc[current]; if (day.daily != null) { recorded += day.daily; if (C.isSeniorOfficer(records[current].attendanceType) === seniorOfficer) netBalance += seniorOfficer ? day.dailySog : day.dailyFlex; } }
   }
   const datesBefore = Object.keys(calc).filter(d => d < period.start).sort();
   const carriedFlex = datesBefore.length ? calc[datesBefore.at(-1)].progressiveFlex : (C.parseDuration(state.settings.openingFlex) || 0);
   const endDates = Object.keys(calc).filter(d => d <= period.end).sort();
   const endFlex = endDates.length ? calc[endDates.at(-1)].progressiveFlex : carriedFlex;
   const toil = endDates.length ? calc[endDates.at(-1)].progressiveToil : (C.parseDuration(state.settings.openingToil) || 0);
-  el("periodDates").textContent = `${formatDisplayDate(period.start, "range")} to ${formatDisplayDate(period.end, "range")}${hasIncomplete ? " · excludes incomplete records" : ""}`;
+  el("periodDates").textContent = `${formatDisplayDate(period.start, "range")} to ${formatDisplayDate(period.end, "range")}`;
   if (seniorOfficer) {
     const priorSogDates = Object.keys(calc).filter(d => d < period.start && calc[d].seniorOfficer).sort();
     const openingSog = priorSogDates.length ? calc[priorSogDates.at(-1)].progressiveSog : 0;
