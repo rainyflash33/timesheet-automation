@@ -8,12 +8,12 @@ const FIELD_GROUPS = {
 const RECORD_FIELDS = [...C.TIME_KEYS, "leaveType", "leaveHours", "attendanceType", "toilHours"];
 const DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 const todayISO = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`; };
-const defaults = { records: {}, submissions: {}, settings: { fortnightStart: "", openingFlex: "0:00", openingToil: "0:00", standardByDay: ["0:00", "7:21", "7:21", "7:21", "7:21", "7:21", "0:00"] } };
+const defaults = { records: {}, submissions: {}, settings: { attendanceType: "Flextime", fortnightStart: "", openingFlex: "0:00", openingToil: "0:00", standardByDay: ["0:00", "7:21", "7:21", "7:21", "7:21", "7:21", "0:00"] } };
 let state = load();
 let activeDate = todayISO();
 let viewStart = "";
-let draft = emptyRecord();
-let originalDraft = emptyRecord();
+let draft = emptyRecord(state.settings.attendanceType);
+let originalDraft = emptyRecord(state.settings.attendanceType);
 let originalSettings = "";
 let reminderStart = "";
 let filterYear = new Date().getFullYear();
@@ -35,7 +35,7 @@ function save() {
   try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); return true; }
   catch (error) { alert(`The app could not save to local storage: ${error.message}`); return false; }
 }
-function emptyRecord() { return { startTime:"", morningOut:"", morningIn:"", lunchOut:"", lunchIn:"", afternoonOut:"", afternoonIn:"", finishTime:"", leaveType:"", leaveHours:"", attendanceType:"Flextime", toilHours:"" }; }
+function emptyRecord(attendanceType = "Flextime") { return { startTime:"", morningOut:"", morningIn:"", lunchOut:"", lunchIn:"", afternoonOut:"", afternoonIn:"", finishTime:"", leaveType:"", leaveHours:"", attendanceType, toilHours:"" }; }
 function validAnchor() { return C.isThursdayISO(state.settings.fortnightStart); }
 function selectedAnchorValid() { return C.isThursdayISO(el("fortnightStart")?.value || ""); }
 function fortnightCalculationAllowed() { return validAnchor() && selectedAnchorValid(); }
@@ -81,7 +81,6 @@ function buildUI() {
     input.addEventListener("input", () => { setDurationError(input, false); if (input.dataset.recordDuration != null) updateDraft(); });
     input.addEventListener("change", () => { formatDurationInput(input, true); if (input.dataset.recordDuration != null) updateDraft(); });
   });
-  el("attendanceType").addEventListener("change", updateDraft);
   el("leaveType").addEventListener("change", () => {
     if (el("leaveType").value === "Public Holiday" && !el("leaveHours").value) el("leaveHours").value = state.settings.standardByDay[new Date(`${activeDate}T00:00:00`).getDay()];
     updateDraft();
@@ -95,6 +94,7 @@ function buildUI() {
   el("cancelInterruption").addEventListener("click", closeInterruptionEditor);
   el("submitRecord").addEventListener("click", submitRecord);
   el("clearRecord").addEventListener("click", clearRecordForm);
+  el("toggleLeaveToil").addEventListener("click", () => setLeaveToilExpanded(el("leaveToilPanel").hidden));
   el("cancelEdit").addEventListener("click", cancelEdit);
   el("saveSettings").addEventListener("click", saveSettings);
   el("settingsToggle").addEventListener("click", () => setSettingsExpanded(el("settingsContent").hidden));
@@ -198,11 +198,12 @@ function updateDraft() { draft = readForm(); renderCurrentPreview(); updateActio
 function clearRecordForm() {
   const current = readForm();
   const editorHasData = Boolean(el("interruptionOut").value || el("interruptionIn").value);
-  if (recordsEqual(current, emptyRecord()) && !editorHasData) return;
-  draft = emptyRecord();
+  if (recordsEqual(current, emptyRecord(state.settings.attendanceType)) && !editorHasData) { setLeaveToilExpanded(false); return; }
+  draft = emptyRecord(state.settings.attendanceType);
   fillForm(draft);
   closeInterruptionEditor();
   renderInterruptionList();
+  setLeaveToilExpanded(false);
   renderCurrentPreview();
   updateActionState();
 }
@@ -250,6 +251,13 @@ function renderInterruptionList() {
   el("toggleInterruptions").hidden = Boolean((draft.morningOut || draft.morningIn) && (draft.afternoonOut || draft.afternoonIn));
   list.querySelectorAll("[data-edit-interruption]").forEach(button => button.addEventListener("click", () => openInterruptionEditor(button.dataset.editInterruption)));
   list.querySelectorAll("[data-remove-interruption]").forEach(button => button.addEventListener("click", () => removeInterruption(button.dataset.removeInterruption)));
+}
+
+function recordHasLeaveToil(record) { return Boolean(record.leaveType || record.leaveHours || record.toilHours); }
+function setLeaveToilExpanded(expanded) {
+  el("leaveToilPanel").hidden = !expanded;
+  el("toggleLeaveToil").setAttribute("aria-expanded", String(expanded));
+  el("toggleLeaveToil").textContent = `${expanded ? "−" : "+"} Add Leave / TOIL Details`;
 }
 
 function periodFor(date) { return C.fortnightFor(date, state.settings.fortnightStart); }
@@ -303,8 +311,8 @@ function loadRecord(date, force = false, mode = "new") {
   if (!force && draftIsDirty() && !confirm("Discard your unsaved changes and open another record?")) return;
   activeDate = date; el("recordDate").value = date;
   editMode = mode === "edit";
-  draft = editMode ? clone(state.records[date]) : emptyRecord(); originalDraft = clone(draft);
-  fillForm(draft); closeInterruptionEditor(); renderInterruptionList(); renderAll();
+  draft = editMode ? clone(state.records[date]) : emptyRecord(state.settings.attendanceType); originalDraft = clone(draft);
+  fillForm(draft); closeInterruptionEditor(); renderInterruptionList(); setLeaveToilExpanded(editMode && recordHasLeaveToil(draft)); renderAll();
   return true;
 }
 function submitRecord() {
@@ -329,7 +337,7 @@ function commitRecordSubmission(submission) {
   state.records[date] = clone(candidateRecord);
   const submittedChanged = !recordsEqual(previous, candidateRecord) && flagSubmittedChange(date);
   if (!save()) { if (previous) state.records[date] = previous; else delete state.records[date]; return; }
-  editMode = false; draft = emptyRecord(); originalDraft = clone(draft); fillForm(draft); closeInterruptionEditor(); renderInterruptionList();
+  editMode = false; draft = emptyRecord(state.settings.attendanceType); originalDraft = clone(draft); fillForm(draft); closeInterruptionEditor(); renderInterruptionList(); setLeaveToilExpanded(false);
   renderAll(); showStatus(existed ? "Changes saved. Later balances have been recalculated." : "Record submitted and added to Timesheet History.");
   if (submittedChanged) alert("This fortnight was previously submitted. The saved record has changed and the fortnight may need to be resubmitted.");
 }
@@ -360,7 +368,7 @@ function workConfirmationFor(date, record) {
 function hasMeaningfulTimesheetData(record, excludeLeaveType = false) {
   return RECORD_FIELDS.some(key => {
     if (excludeLeaveType && key === "leaveType") return false;
-    if (key === "attendanceType") return Boolean(record[key] && record[key] !== "Flextime");
+    if (key === "attendanceType") return false;
     return Boolean(record[key]);
   });
 }
@@ -388,8 +396,8 @@ function closeWorkConfirmation() {
 function cancelEdit() {
   if (!editMode) return;
   if (draftIsDirty() && !confirm("Discard your unsaved changes and cancel editing?")) return;
-  editMode = false; draft = emptyRecord(); originalDraft = clone(draft);
-  fillForm(draft); closeInterruptionEditor(); renderInterruptionList(); renderAll(); showStatus("Edit cancelled.");
+  editMode = false; draft = emptyRecord(state.settings.attendanceType); originalDraft = clone(draft);
+  fillForm(draft); closeInterruptionEditor(); renderInterruptionList(); setLeaveToilExpanded(false); renderAll(); showStatus("Edit cancelled.");
 }
 function validateInterruptions(record) {
   const hasMorning = record.morningOut || record.morningIn;
@@ -415,7 +423,7 @@ function deleteRecord(date) {
   const submittedChanged = flagSubmittedChange(date);
   const deleted = state.records[date]; delete state.records[date];
   if (!save()) { state.records[date] = deleted; return; }
-  if (date === activeDate) { editMode = false; draft = emptyRecord(); originalDraft = clone(draft); fillForm(draft); closeInterruptionEditor(); renderInterruptionList(); }
+  if (date === activeDate) { editMode = false; draft = emptyRecord(state.settings.attendanceType); originalDraft = clone(draft); fillForm(draft); closeInterruptionEditor(); renderInterruptionList(); setLeaveToilExpanded(false); }
   renderAll(); showStatus("Record deleted. Later balances have been recalculated.");
   if (submittedChanged) alert("This fortnight was previously submitted. A record was deleted and the fortnight may need to be resubmitted.");
 }
@@ -551,12 +559,12 @@ function markFortnightSubmitted() {
 }
 
 function renderSettings() {
-  el("fortnightStart").value = state.settings.fortnightStart; el("openingFlex").value = state.settings.openingFlex; el("openingToil").value = state.settings.openingToil;
+  el("attendanceTypeSetting").value = state.settings.attendanceType; el("fortnightStart").value = state.settings.fortnightStart; el("openingFlex").value = state.settings.openingFlex; el("openingToil").value = state.settings.openingToil;
   state.settings.standardByDay.forEach((value, index) => el(`standard${index}`).value = value);
   document.querySelectorAll("[data-setting-duration]").forEach(input => setDurationError(input, false));
   originalSettings = settingsSnapshot(); setSettingsStatus(""); updateConfigurationValidity();
 }
-function settingsSnapshot() { return JSON.stringify({ fortnightStart: el("fortnightStart")?.value || "", openingFlex: el("openingFlex")?.value || "", openingToil: el("openingToil")?.value || "", standardByDay: DAY_NAMES.map((_, i) => el(`standard${i}`)?.value || "") }); }
+function settingsSnapshot() { return JSON.stringify({ attendanceType: el("attendanceTypeSetting")?.value || "Flextime", fortnightStart: el("fortnightStart")?.value || "", openingFlex: el("openingFlex")?.value || "", openingToil: el("openingToil")?.value || "", standardByDay: DAY_NAMES.map((_, i) => el(`standard${i}`)?.value || "") }); }
 function setSettingsStatus(message, error = false) { el("settingsStatus").textContent = message; el("settingsStatus").classList.toggle("error", error); }
 function setSettingsExpanded(expanded) {
   el("settingsContent").hidden = !expanded;
@@ -585,6 +593,7 @@ function saveSettings() {
   const previousSettings = state.settings;
   state.settings = JSON.parse(settingsSnapshot()); viewStart = periodFor(activeDate).start;
   if (!save()) { state.settings = previousSettings; setSettingsStatus("Settings could not be saved to localStorage.", true); return; }
+  if (!editMode) { draft.attendanceType = state.settings.attendanceType; originalDraft.attendanceType = state.settings.attendanceType; }
   originalSettings = settingsSnapshot(); renderAll(); setSettingsStatus("Settings saved"); showStatus("Settings saved. All balances have been recalculated."); setSettingsExpanded(false);
 }
 function showStatus(message, error = false) { el("status").textContent = message; el("status").classList.toggle("error", error); }

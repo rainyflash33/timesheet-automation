@@ -30,6 +30,10 @@ h3 { font-size: .95rem; margin-top: 24px; }
 .interruption-item { display: grid; justify-items: start; gap: 5px; padding: 12px 0; border-bottom: 1px solid #eeeaf4; }
 .interruption-item span { color: #4c4556; font-variant-numeric: tabular-nums; }
 .interruption-toggle { margin-top: 18px; }
+.optional-details-toggle { display: block; margin-top: 10px; }
+.leave-toil-panel { margin-top: 12px; padding: 16px; border: 1px solid #e7e2ef; border-radius: 12px; background: #fff; }
+.leave-toil-panel[hidden] { display: none; }
+.leave-toil-grid { display: grid; grid-template-columns: 1.3fr 1fr 1fr; gap: 14px; align-items: start; }
 .time-row { display: grid; grid-template-columns: 1fr 105px 58px; align-items: end; gap: 8px; margin-top: 12px; }
 label { display: grid; gap: 7px; font-size: .82rem; font-weight: 650; color: #514a5c; }
 input, select, button { font: inherit; border-radius: 8px; }
@@ -168,6 +172,7 @@ th, td { padding: 11px 8px; border-bottom: 1px solid #eeeaf2; text-align: left; 
   .form-grid,
   .basic-time-fields,
   .interruption-editor #interruptionInputs,
+  .leave-toil-grid,
   .history-filters {
     width: 100%;
     grid-template-columns: 1fr;
@@ -211,7 +216,7 @@ th, td { padding: 11px 8px; border-bottom: 1px solid #eeeaf2; text-align: left; 
   .settings .form-grid {
     display: grid;
     width: 100%;
-    grid-template-columns: .82fr 1fr 1fr;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
     column-gap: 18px;
     row-gap: 14px;
     align-items: start;

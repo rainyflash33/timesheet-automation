@@ -11,7 +11,7 @@
   <link rel="manifest" href="manifest.webmanifest?v=clocky-icon-v2">
   <link rel="icon" type="image/png" sizes="192x192" href="assets/icons/clocky-icon-192.png?v=clocky-icon-v2">
   <link rel="apple-touch-icon" sizes="180x180" href="assets/icons/clocky-apple-touch-icon-180.png?v=clocky-icon-v2">
-  <link rel="stylesheet" href="styles.css?v=install-clocky-v1">
+  <link rel="stylesheet" href="styles.css?v=workflow-simplification-v1">
 </head>
 <body>
   <main>
@@ -42,20 +42,13 @@
         <div class="record-actions"><button id="saveInterruption">Save</button><button id="cancelInterruption" class="secondary">Cancel</button></div>
       </div>
       <div id="interruptionList" class="interruption-list" hidden></div>
-    </section>
-
-    <section class="card details">
-      <h2>Other details</h2>
-      <div class="form-grid">
+      <button id="toggleLeaveToil" class="secondary optional-details-toggle" type="button" aria-expanded="false" aria-controls="leaveToilPanel">+ Add Leave / TOIL Details</button>
+      <div id="leaveToilPanel" class="leave-toil-panel" hidden>
+        <div class="leave-toil-grid">
         <label>Leave Type<select id="leaveType"></select></label>
         <label>Leave Hours <input id="leaveHours" data-duration data-record-duration inputmode="numeric" placeholder="HMM" aria-describedby="leaveHoursError"><span id="leaveHoursError" class="field-error" role="alert" hidden>Enter digits with minutes from 00 to 59, for example 721.</span></label>
-        <label>Attendance Type
-          <select id="attendanceType">
-            <option value="Flextime" selected>Flextime</option>
-            <option value="Senior Officer A/B">Senior Officer A/B</option>
-          </select>
-        </label>
         <label>TOIL Hours earned <input id="toilHours" data-duration data-record-duration inputmode="numeric" placeholder="HMM" aria-describedby="toilHoursError"><span id="toilHoursError" class="field-error" role="alert" hidden>Enter digits with minutes from 00 to 59, for example 130.</span></label>
+        </div>
       </div>
       <div class="record-actions">
         <button id="submitRecord">Submit</button>
@@ -87,6 +80,12 @@
       <div id="settingsContent">
         <p class="muted">Changes recalculate every saved record.</p>
         <div class="form-grid">
+          <label>Attendance Type
+            <select id="attendanceTypeSetting">
+              <option value="Flextime">Flextime</option>
+              <option value="Senior Officer">Senior Officer</option>
+            </select>
+          </label>
           <label>Fortnight start date <input id="fortnightStart" type="date"><span id="fortnightStartError" class="field-error" role="alert" hidden>Fortnight must start on a Thursday.</span></label>
           <label>Opening Flex Balance <input id="openingFlex" data-duration data-setting-duration inputmode="decimal" placeholder="HMM" aria-describedby="openingFlexError"><span id="openingFlexError" class="field-error" role="alert" hidden>Enter a duration such as 721 or -130.</span></label>
           <label>Opening TOIL Balance <input id="openingToil" data-duration data-setting-duration inputmode="numeric" placeholder="HMM" aria-describedby="openingToilError"><span id="openingToilError" class="field-error" role="alert" hidden>Enter digits with minutes from 00 to 59, for example 050.</span></label>
@@ -207,7 +206,7 @@
     </section>
   </div>
   <script src="calculator.js"></script>
-  <script src="app.js?v=two-additional-entries-v1"></script>
+  <script src="app.js?v=attendance-settings-leave-panel-v1"></script>
   <script src="pwa-register.js?v=install-clocky-v1"></script>
 </body>
 </html>
