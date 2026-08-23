@@ -116,7 +116,7 @@
     el("clearRecord").click(); input("lunchOut", "1230"); input("lunchIn", "1300"); el("toggleInterruptions").click(); input("interruptionOut", "1100");
     assert(!el("status").textContent.includes("Incomplete record"), "partial Additional Time Entry displayed a live incomplete-record warning");
     el("submitRecord").click();
-    assert(alerts.at(-1).includes("Save or cancel the Additional Time Entry") && activeDate === liveEntryDate && !state.records[liveEntryDate], "partial Additional Time Entry was not blocked at Submit");
+    assert(alerts.at(-1).includes("complete Additional Time Entry") && !el("interruptionEditor").hidden && activeDate === liveEntryDate && !state.records[liveEntryDate], "partial Additional Time Entry was not blocked at Submit with its editor open");
     el("cancelInterruption").click(); el("clearRecord").click();
 
     input("startTime", "0900"); input("lunchOut", "1200"); input("lunchIn", "1300"); input("finishTime", "1721");
@@ -151,8 +151,7 @@
     assertRecordFormCleared("Daily Entry and Leave / TOIL");
 
     input("lunchOut", "1230"); input("lunchIn", "1330");
-    el("toggleInterruptions").click(); input("interruptionOut", "1000"); input("interruptionIn", "1030"); el("saveInterruption").click();
-    el("toggleInterruptions").click(); input("interruptionOut", "1500"); input("interruptionIn", "1530"); el("saveInterruption").click();
+    Object.assign(draft, {morningOut:"10:00", morningIn:"10:30", afternoonOut:"15:00", afternoonIn:"15:30"}); renderInterruptionList();
     assert(!el("interruptionList").hidden && draft.morningOut === "10:00" && draft.afternoonOut === "15:00", "two Additional Time Entry clear test setup failed");
     el("clearRecord").click();
     assertRecordFormCleared("Morning and Afternoon Additional Time Entries");
@@ -334,40 +333,43 @@
 
     setSettingsExpanded(true); change("attendanceTypeSetting", "Flextime"); el("saveSettings").click();
 
-    input("startTime", "0900"); input("lunchOut", "1200"); input("lunchIn", "1300"); input("finishTime", "1721");
-    el("toggleInterruptions").click();
-    assert(el("interruptionEditorTitle").textContent === "Morning Additional Time Entry", "first Additional Time Entry did not open the Morning editor");
-    input("interruptionOut", "1100"); input("interruptionIn", "1130"); el("saveInterruption").click();
-    assert(draft.morningOut === "11:00" && !draft.afternoonOut, "Morning Additional Time Entry was not saved independently");
-    assert(!el("toggleInterruptions").hidden && metric("dailyResults", "Daily Hours") === "6:51", "Morning-only entry or second-entry action is incorrect");
-    el("toggleInterruptions").click();
-    assert(el("interruptionEditorTitle").textContent === "Afternoon Additional Time Entry", "second Additional Time Entry did not open the Afternoon editor");
-    input("interruptionOut", "1500"); input("interruptionIn", "1520"); el("saveInterruption").click();
-    assert(draft.afternoonOut === "15:00" && draft.afternoonIn === "15:20", "Afternoon Additional Time Entry was not saved independently");
-    assert(el("interruptionList").textContent.includes("Morning Additional Time Entry") && el("interruptionList").textContent.includes("Afternoon Additional Time Entry"), "saved entries are not labelled Morning and Afternoon");
-    assert(el("toggleInterruptions").hidden, "Add Additional Time Entry remained available after both slots were saved");
-    assert(metric("dailyResults", "Daily Hours") === "6:31", "both Additional Time Entries were not subtracted from Daily Hours");
-    assert(metric("dailyResults", "Daily Flex Balance") === "-0:50", "both Additional Time Entries were not included in Daily Flex");
-    el("interruptionList").querySelector("[data-edit-interruption='morning']").click(); input("interruptionIn", "1120"); el("saveInterruption").click();
-    assert(draft.morningIn === "11:20" && draft.afternoonOut === "15:00" && draft.afternoonIn === "15:20", "editing Morning affected Afternoon");
-    assert(metric("dailyResults", "Daily Hours") === "6:41", "editing Morning did not refresh Daily Hours");
-    el("interruptionList").querySelector("[data-remove-interruption='morning']").click();
-    assert(!draft.morningOut && !draft.morningIn && draft.afternoonOut === "15:00" && draft.afternoonIn === "15:20", "removing Morning affected Afternoon");
-    assert(!el("toggleInterruptions").hidden && metric("dailyResults", "Daily Hours") === "7:01", "removing Morning did not restore the slot or calculations");
-    assert(metric("dailyResults", "Progressive Flex Balance") === "-0:20", "Additional Time Entry preview Progressive Flex is stale");
-    assert(metric("dailyResults", "Progressive TOIL Balance") === "0:00", "Additional Time Entry preview TOIL is incorrect");
-    assert(metric("fortnightResults", "Hours Recorded This Period") === "7:01", "Fortnight hours do not match the two-entry preview");
-    assert(metric("fortnightResults", "Net Flex for the Period") === "-0:20", "Fortnight flex does not match the two-entry preview");
-    const interruptionRecordDate = activeDate; el("submitRecord").click();
-    el("recordsBody").querySelector(`[data-edit="${interruptionRecordDate}"]`).click();
-    assert(metric("dailyResults", "Daily Hours") === "7:01", "Daily Hours became stale after Submit");
-    assert(metric("dailyResults", "Daily Flex Balance") === "-0:20", "Daily Flex became stale after Submit");
-    el("interruptionList").querySelector("[data-edit-interruption='afternoon']").click(); input("interruptionIn", "1510"); el("saveInterruption").click();
-    assert(metric("dailyResults", "Daily Hours") === "7:11" && metric("dailyResults", "Daily Flex Balance") === "-0:10" && metric("fortnightResults", "Hours Recorded This Period") === "7:11" && metric("fortnightResults", "Net Flex for the Period") === "-0:10", "Editing Afternoon did not update both displays");
-    el("interruptionList").querySelector("[data-remove-interruption='afternoon']").click();
-    assert(metric("dailyResults", "Daily Hours") === "7:21" && metric("dailyResults", "Daily Flex Balance") === "0:00" && metric("fortnightResults", "Hours Recorded This Period") === "7:21" && metric("fortnightResults", "Net Flex for the Period") === "0:00", "Removing Afternoon did not update both displays");
-    el("cancelEdit").click();
-    el("recordsBody").querySelector(`[data-delete="${interruptionRecordDate}"]`).click();
+    // Additional Time Entries are classified by lunch relationship and staged by the main Save action.
+    loadRecord("2026-08-24", true); input("startTime", "0900"); input("lunchOut", "1230"); input("lunchIn", "1310"); input("finishTime", "1721");
+    assert(!el("saveInterruption"), "the separate Additional Time Entry Save button still exists");
+    el("toggleInterruptions").click(); input("interruptionOut", "1500"); input("interruptionIn", "1520"); el("submitRecord").click();
+    assert(state.records["2026-08-24"]?.afternoonOut === "15:00" && !state.records["2026-08-24"]?.morningOut, "first and only afternoon entry was not saved as Afternoon");
+    loadRecord("2026-08-24", true, "edit"); el("interruptionList").querySelector("[data-edit-interruption='afternoon']").click(); input("interruptionIn", "1530"); el("cancelInterruption").click();
+    assert(draft.afternoonIn === "15:20", "cancelling an Additional Time Entry edit changed its original value");
+    el("interruptionList").querySelector("[data-edit-interruption='afternoon']").click(); input("interruptionIn", "1530"); el("submitRecord").click();
+    assert(state.records["2026-08-24"].afternoonIn === "15:30", "main Save Changes did not update an Additional Time Entry");
+    loadRecord("2026-08-24", true, "edit"); el("toggleInterruptions").click(); input("interruptionOut", "1030"); input("interruptionIn", "1045"); el("submitRecord").click();
+    assert(state.records["2026-08-24"].morningOut === "10:30" && state.records["2026-08-24"].afternoonOut === "15:00", "Afternoon-first then Morning did not preserve both entries");
+    loadRecord("2026-08-24", true, "edit"); el("interruptionList").querySelector("[data-remove-interruption='morning']").click(); el("submitRecord").click();
+    assert(!state.records["2026-08-24"].morningOut && state.records["2026-08-24"].afternoonOut === "15:00", "Remove did not delete only the selected entry");
+
+    loadRecord("2026-08-25", true); input("startTime", "0900"); input("lunchOut", "1230"); input("lunchIn", "1310"); input("finishTime", "1721"); el("toggleInterruptions").click(); input("interruptionOut", "1030"); input("interruptionIn", "1045"); el("submitRecord").click();
+    assert(state.records["2026-08-25"]?.morningOut === "10:30" && !state.records["2026-08-25"]?.afternoonOut, "first and only morning entry was not saved as Morning");
+    loadRecord("2026-08-25", true, "edit"); el("toggleInterruptions").click(); input("interruptionOut", "1500"); input("interruptionIn", "1520"); el("submitRecord").click();
+    assert(state.records["2026-08-25"].morningOut === "10:30" && state.records["2026-08-25"].afternoonOut === "15:00", "Morning-first then Afternoon did not preserve both entries");
+    loadRecord("2026-08-26", true); input("startTime", "0900"); input("lunchOut", "1230"); input("lunchIn", "1310"); input("finishTime", "1721"); el("toggleInterruptions").click(); input("interruptionOut", "1500"); input("interruptionIn", "1520"); el("cancelInterruption").click();
+    assert(el("interruptionEditor").hidden && !draft.morningOut && !draft.afternoonOut, "cancelling a new Additional Time Entry did not discard it");
+    el("toggleInterruptions").click(); input("interruptionOut", "1220"); input("interruptionIn", "1240"); const beforeLunchOverlap = localStorage.getItem(STORAGE_KEY); el("submitRecord").click();
+    assert(alerts.at(-1).includes("overlaps the lunch period") && !el("interruptionEditor").hidden && localStorage.getItem(STORAGE_KEY) === beforeLunchOverlap, "lunch-overlapping Additional Time Entry was not clearly rejected");
+    el("cancelInterruption").click(); el("clearRecord").click();
+    ["2026-08-24", "2026-08-25"].forEach(date => { delete state.records[date]; }); save(); loadRecord("2026-08-26", true);
+
+    // Leave / TOIL uses the same main-save and local-cancel interaction pattern.
+    el("toggleLeaveToil").click(); change("leaveType", "Annual"); change("leaveHours", "721"); change("toilHours", "100"); el("cancelLeaveToil").click();
+    assert(el("leaveToilPanel").hidden && !draft.leaveType && !draft.leaveHours && !draft.toilHours, "cancelling new Leave / TOIL details did not clear and close the section");
+    el("toggleLeaveToil").click(); change("leaveType", "Annual"); change("leaveHours", "721"); const leaveRecordDate = activeDate; el("submitRecord").click();
+    assert(state.records[leaveRecordDate]?.leaveType === "Annual" && state.records[leaveRecordDate]?.leaveHours === "7:21", "valid new Leave details were not saved by the main Save action");
+    loadRecord("2026-08-27", true); el("toggleLeaveToil").click(); change("leaveType", "Annual"); const beforeIncompleteLeave = localStorage.getItem(STORAGE_KEY); el("submitRecord").click();
+    assert(localStorage.getItem(STORAGE_KEY) === beforeIncompleteLeave && !el("leaveToilPanel").hidden, "incomplete Leave details saved or collapsed their editor");
+    el("cancelLeaveToil").click(); loadRecord(leaveRecordDate, true, "edit"); change("leaveHours", "421"); el("cancelLeaveToil").click();
+    assert(el("leaveToilPanel").hidden && draft.leaveHours === "7:21" && state.records[leaveRecordDate].leaveHours === "7:21", "cancelling edited Leave details did not preserve the saved values");
+    setLeaveToilExpanded(true); change("leaveHours", "421"); el("submitRecord").click();
+    assert(state.records[leaveRecordDate].leaveHours === "4:21", "main Save Changes did not update Leave details");
+    delete state.records[leaveRecordDate]; save(); loadRecord("2026-08-27", true);
 
     setSettingsExpanded(true); change("attendanceTypeSetting", "Senior Officer A/B"); el("saveSettings").click();
     el("toggleLeaveToil").click(); change("toilHours", "100"); const toilRecordDate = activeDate; el("submitRecord").click();

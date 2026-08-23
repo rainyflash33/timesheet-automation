@@ -37,9 +37,9 @@
       <div id="basicFields" class="basic-time-fields"></div>
       <button id="toggleInterruptions" class="secondary interruption-toggle">+ Add Additional Time Entry</button>
       <div id="interruptionEditor" class="interruption-editor" hidden>
-        <h3 id="interruptionEditorTitle">Morning Additional Time Entry</h3>
+        <h3 id="interruptionEditorTitle">Additional Time Entry</h3>
         <div id="interruptionInputs"></div>
-        <div class="record-actions"><button id="saveInterruption">Save</button><button id="cancelInterruption" class="secondary">Cancel</button></div>
+        <div class="record-actions"><button id="cancelInterruption" class="secondary">Cancel</button></div>
       </div>
       <div id="interruptionList" class="interruption-list" hidden></div>
       <button id="toggleLeaveToil" class="secondary optional-details-toggle" type="button" aria-expanded="false" aria-controls="leaveToilPanel">+ Add Leave / TOIL Details</button>
@@ -49,6 +49,7 @@
         <label>Leave Hours <input id="leaveHours" data-duration data-record-duration inputmode="numeric" placeholder="HMM" aria-describedby="leaveHoursError"><span id="leaveHoursError" class="field-error" role="alert" hidden>Enter digits with minutes from 00 to 59, for example 721.</span></label>
         <label>TOIL Hours earned <input id="toilHours" data-duration data-record-duration inputmode="numeric" placeholder="HMM" aria-describedby="toilHoursError"><span id="toilHoursError" class="field-error" role="alert" hidden>Enter digits with minutes from 00 to 59, for example 130.</span></label>
         </div>
+        <div class="record-actions"><button id="cancelLeaveToil" class="secondary" type="button">Cancel</button></div>
       </div>
       <div class="record-actions">
         <button id="submitRecord">Submit</button>

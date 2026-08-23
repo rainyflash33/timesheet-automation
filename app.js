@@ -20,6 +20,7 @@ let filterYear = new Date().getFullYear();
 let filterMonth = new Date().getMonth() + 1;
 let editingInterruption = "";
 let originalInterruptionEditor = "";
+let originalLeaveToil = null;
 let editMode = false;
 let pendingRecordSubmission = null;
 
@@ -108,11 +109,11 @@ function buildUI() {
   el("filterYear").addEventListener("change", () => changePeriodFilter(Number(el("filterYear").value), filterMonth));
   el("filterMonth").addEventListener("change", () => changePeriodFilter(filterYear, Number(el("filterMonth").value)));
   el("toggleInterruptions").addEventListener("click", () => openInterruptionEditor());
-  el("saveInterruption").addEventListener("click", saveInterruption);
   el("cancelInterruption").addEventListener("click", closeInterruptionEditor);
   el("submitRecord").addEventListener("click", submitRecord);
   el("clearRecord").addEventListener("click", clearRecordForm);
   el("toggleLeaveToil").addEventListener("click", () => setLeaveToilExpanded(el("leaveToilPanel").hidden));
+  el("cancelLeaveToil").addEventListener("click", cancelLeaveToil);
   el("cancelEdit").addEventListener("click", cancelEdit);
   el("saveSettings").addEventListener("click", saveSettings);
   el("openResetHistory").addEventListener("click", openResetHistoryModal);
@@ -233,12 +234,11 @@ function clearRecordForm() {
 }
 
 function openInterruptionEditor(slot = "") {
-  const nextSlot = slot || (!(draft.morningOut || draft.morningIn) ? "morning" : !(draft.afternoonOut || draft.afternoonIn) ? "afternoon" : "");
-  if (!nextSlot) return;
-  editingInterruption = nextSlot;
-  el("interruptionEditorTitle").textContent = `${nextSlot === "morning" ? "Morning" : "Afternoon"} Additional Time Entry`;
-  el("interruptionOut").value = draft[`${nextSlot}Out`] || "";
-  el("interruptionIn").value = draft[`${nextSlot}In`] || "";
+  if (!slot && (draft.morningOut || draft.morningIn) && (draft.afternoonOut || draft.afternoonIn)) return;
+  editingInterruption = slot;
+  el("interruptionEditorTitle").textContent = `${slot ? `${slot === "morning" ? "Morning" : "Afternoon"} ` : ""}Additional Time Entry`;
+  el("interruptionOut").value = slot ? draft[`${slot}Out`] || "" : "";
+  el("interruptionIn").value = slot ? draft[`${slot}In`] || "" : "";
   el("interruptionEditor").hidden = false;
   originalInterruptionEditor = interruptionEditorSnapshot();
   el("interruptionOut").focus();
@@ -249,17 +249,33 @@ function closeInterruptionEditor() {
   document.querySelectorAll("[data-interruption-time]").forEach(input => setClockError(input, false));
   originalInterruptionEditor = "";
 }
-function saveInterruption() {
-  if (!validateClockInputs("[data-interruption-time]")) return;
+function classifyInterruption(out, incoming, record) {
+  const lunchOut = normalizeClockTime(record.lunchOut), lunchIn = normalizeClockTime(record.lunchIn);
+  if (clockTimeIsValid(lunchOut) && clockTimeIsValid(lunchIn) && lunchOut < lunchIn) {
+    if (incoming <= lunchOut) return "morning";
+    if (out >= lunchIn) return "afternoon";
+    return "";
+  }
+  if (incoming <= "12:00") return "morning";
+  if (out >= "12:00") return "afternoon";
+  return "";
+}
+function stageInterruptionFromEditor() {
+  if (el("interruptionEditor").hidden) return true;
+  if (!validateClockInputs("[data-interruption-time]")) return false;
   const out = normalizeClockTime(el("interruptionOut").value), incoming = normalizeClockTime(el("interruptionIn").value);
-  const lunchOut = normalizeClockTime(draft.lunchOut), lunchIn = normalizeClockTime(draft.lunchIn);
-  if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(out) || !/^([01]\d|2[0-3]):[0-5]\d$/.test(incoming) || out >= incoming) { alert("Enter a complete Additional Time Entry with an Out time before its In time."); return; }
-  if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(lunchOut) || !/^([01]\d|2[0-3]):[0-5]\d$/.test(lunchIn) || lunchOut >= lunchIn) { alert("Enter valid Lunch Out and Lunch In times before adding an Additional Time Entry, so it can be placed correctly."); return; }
-  const slot = editingInterruption;
-  if (slot === "morning" && incoming > lunchOut) { alert("Morning Additional Time Entry must finish before Lunch Out."); return; }
-  if (slot === "afternoon" && out < lunchIn) { alert("Afternoon Additional Time Entry must start after Lunch In."); return; }
+  if (!clockTimeIsValid(out) || !clockTimeIsValid(incoming) || out >= incoming) { alert("Enter a complete Additional Time Entry with an Out time before its In time."); return false; }
+  const slot = classifyInterruption(out, incoming, readForm());
+  if (!slot) { alert("An Additional Time Entry overlaps the lunch period. Please adjust its times before saving."); return false; }
+  const otherSlot = slot === "morning" ? "afternoon" : "morning";
+  const existingSlot = editingInterruption;
+  if (slot !== existingSlot && (draft[`${slot}Out`] || draft[`${slot}In`])) { alert(`This Additional Time Entry overlaps an existing ${slot === "morning" ? "Morning" : "Afternoon"} Additional Time Entry.`); return false; }
+  const otherOut = draft[`${otherSlot}Out`], otherIn = draft[`${otherSlot}In`];
+  if (otherOut && otherIn && out < otherIn && incoming > otherOut) { alert("This Additional Time Entry overlaps an existing Additional Time Entry."); return false; }
+  if (existingSlot && existingSlot !== slot) { draft[`${existingSlot}Out`] = ""; draft[`${existingSlot}In`] = ""; }
   draft[`${slot}Out`] = out; draft[`${slot}In`] = incoming;
   closeInterruptionEditor(); renderInterruptionList(); renderCurrentPreview(); updateActionState();
+  return true;
 }
 function removeInterruption(slot) {
   draft[`${slot}Out`] = ""; draft[`${slot}In`] = "";
@@ -279,9 +295,17 @@ function renderInterruptionList() {
 
 function recordHasLeaveToil(record) { return Boolean(record.leaveType || record.leaveHours || record.toilHours); }
 function setLeaveToilExpanded(expanded) {
+  if (expanded && el("leaveToilPanel").hidden) originalLeaveToil = { leaveType:draft.leaveType, leaveHours:draft.leaveHours, toilHours:draft.toilHours };
   el("leaveToilPanel").hidden = !expanded;
   el("toggleLeaveToil").setAttribute("aria-expanded", String(expanded));
   el("toggleLeaveToil").textContent = `${expanded ? "−" : "+"} Add Leave / TOIL Details`;
+}
+function cancelLeaveToil() {
+  const snapshot = originalLeaveToil || { leaveType:"", leaveHours:"", toilHours:"" };
+  Object.assign(draft, snapshot);
+  ["leaveType", "leaveHours", "toilHours"].forEach(key => { el(key).value = snapshot[key] || ""; });
+  document.querySelectorAll("[data-record-duration]").forEach(input => setDurationError(input, false));
+  setLeaveToilExpanded(false); originalLeaveToil = null; renderCurrentPreview(); updateActionState();
 }
 
 function periodFor(date) { return C.fortnightFor(date, state.settings.fortnightStart); }
@@ -343,13 +367,15 @@ function submitRecord() {
   if (!fortnightCalculationAllowed()) { setSettingsExpanded(true); alert("Please set the Fortnight Start Date to a Thursday before saving records."); el("fortnightStart").focus(); return; }
   if (!validateClockInputs("[data-record-time]")) return;
   if (!validateDurationInputs("[data-record-duration]")) return;
-  if (interruptionEditorIsDirty()) { alert("Save or cancel the Additional Time Entry before submitting the daily record."); return; }
+  draft = readForm();
+  if (!stageInterruptionFromEditor()) return;
   const existed = Object.prototype.hasOwnProperty.call(state.records, activeDate);
   if (!editMode && existed) { alert("A record already exists for this date. Use Edit in Timesheet History to change it."); return; }
   if (editMode && !existed) { alert("This record no longer exists. Cancel the edit and submit it as a new record."); return; }
   const candidateRecord = readForm();
   if (C.isSeniorOfficer(candidateRecord.attendanceType) && candidateRecord.leaveType === "Flex") { alert("Flex Leave is not available for Senior Officer A/B attendance records."); el("leaveType").focus(); return; }
   draft = clone(candidateRecord);
+  if (!validateLeaveToil(candidateRecord)) return;
   if (!validateInterruptions(candidateRecord)) return;
   if (!validateRecordCompleteness(candidateRecord)) return;
   const submission = { date:activeDate, candidateRecord:clone(candidateRecord), previous:state.records[activeDate] ? clone(state.records[activeDate]) : null, existed, wasEditMode:editMode };
@@ -443,19 +469,23 @@ function cancelEdit() {
 function validateInterruptions(record) {
   const hasMorning = record.morningOut || record.morningIn;
   const hasAfternoon = record.afternoonOut || record.afternoonIn;
-  if ((hasMorning || hasAfternoon) && (!record.lunchOut || !record.lunchIn)) {
-    alert("Enter Lunch Out and Lunch In so each Additional Time Entry can be placed outside the lunch period."); return false;
-  }
   if (hasMorning && (!record.morningOut || !record.morningIn || record.morningOut >= record.morningIn)) {
     alert("Complete the Additional Time Entry Out and In times before submitting."); return false;
   }
   if (hasAfternoon && (!record.afternoonOut || !record.afternoonIn || record.afternoonOut >= record.afternoonIn)) {
     alert("Complete the Additional Time Entry Out and In times before submitting."); return false;
   }
-  if ((hasMorning && record.morningIn > record.lunchOut) || (hasAfternoon && record.afternoonOut < record.lunchIn)) {
+  if (record.lunchOut && record.lunchIn && ((hasMorning && record.morningIn > record.lunchOut) || (hasAfternoon && record.afternoonOut < record.lunchIn))) {
     alert("An Additional Time Entry overlaps the lunch period. Please adjust its times before submitting."); return false;
   }
   return true;
+}
+function validateLeaveToil(record) {
+  if (Boolean(record.leaveType) === Boolean(record.leaveHours)) return true;
+  setLeaveToilExpanded(true);
+  alert("Complete both Leave Type and Leave Hours before saving the daily record.");
+  el(record.leaveType ? "leaveHours" : "leaveType").focus();
+  return false;
 }
 function validateRecordCompleteness(record) {
   if (!C.calculateDay(record, C.standardFor(activeDate, state.settings)).incomplete) return true;
