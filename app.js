@@ -36,6 +36,24 @@ function save() {
   catch (error) { alert(`The app could not save to local storage: ${error.message}`); return false; }
 }
 function emptyRecord(attendanceType = "Flextime") { return { startTime:"", morningOut:"", morningIn:"", lunchOut:"", lunchIn:"", afternoonOut:"", afternoonIn:"", finishTime:"", leaveType:"", leaveHours:"", attendanceType, toilHours:"" }; }
+function displayAttendanceType(value) { return C.isSeniorOfficer(value) ? "Senior Officer A/B" : "Flextime"; }
+function formatDisplayDate(iso, style = "history") {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso || "");
+  if (!match) return iso || "";
+  const [, year, month, day] = match;
+  const date = new Date(Date.UTC(Number(year), Number(month) - 1, Number(day)));
+  const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const weekdays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  if (style === "range") return `${Number(day)} ${months[Number(month) - 1]} ${year}`;
+  return `${day}-${month}-${year} ${weekdays[date.getUTCDay()]}`;
+}
+function updateLeaveTypeOptions() {
+  const current = el("leaveType").value;
+  const seniorOfficer = C.isSeniorOfficer(draft.attendanceType);
+  el("leaveType").innerHTML = LEAVE_TYPES.map(value => `<option${value === "Flex" && seniorOfficer ? " disabled" : ""}>${value}</option>`).join("");
+  if ([...el("leaveType").options].some(option => option.value === current)) el("leaveType").value = current;
+  if (seniorOfficer && current === "Flex") el("leaveType").value = "";
+}
 function validAnchor() { return C.isThursdayISO(state.settings.fortnightStart); }
 function selectedAnchorValid() { return C.isThursdayISO(el("fortnightStart")?.value || ""); }
 function fortnightCalculationAllowed() { return validAnchor() && selectedAnchorValid(); }
@@ -62,7 +80,7 @@ function buildUI() {
     row.innerHTML = `<label for="${key}">${label}</label><input id="${key}" class="clock-time" data-record-time type="text" inputmode="numeric" maxlength="5" pattern="(?:[01]\\d|2[0-3]):[0-5]\\d" placeholder="HHMM" aria-label="${label}, 24-hour time" aria-describedby="${key}Error"><button data-stamp="${key}">Now</button><span id="${key}Error" class="time-error" hidden>Enter a valid time from 0000 to 2359.</span>`;
     el(container).append(row);
   }));
-  el("leaveType").innerHTML = LEAVE_TYPES.map(value => `<option>${value}</option>`).join("");
+  updateLeaveTypeOptions();
   DAY_NAMES.forEach((name, index) => {
     const label = document.createElement("label"); label.innerHTML = `${name}<input id="standard${index}" data-duration data-setting-duration inputmode="numeric" placeholder="HMM" aria-describedby="standard${index}Error"><span id="standard${index}Error" class="field-error" role="alert" hidden>Use digits such as 721; minutes must be 00–59.</span>`; el("weekdaySettings").append(label);
   });
@@ -189,6 +207,7 @@ function readForm() {
   return value;
 }
 function fillForm(value) {
+  updateLeaveTypeOptions();
   RECORD_FIELDS.forEach(key => { if (el(key)) el(key).value = value[key] || (key === "attendanceType" ? "Flextime" : ""); });
   document.querySelectorAll("[data-record-time]").forEach(input => setClockError(input, false));
   document.querySelectorAll("[data-record-duration]").forEach(input => setDurationError(input, false));
@@ -324,6 +343,7 @@ function submitRecord() {
   if (!editMode && existed) { alert("A record already exists for this date. Use Edit in Timesheet History to change it."); return; }
   if (editMode && !existed) { alert("This record no longer exists. Cancel the edit and submit it as a new record."); return; }
   const candidateRecord = readForm();
+  if (C.isSeniorOfficer(candidateRecord.attendanceType) && candidateRecord.leaveType === "Flex") { alert("Flex Leave is not available for Senior Officer A/B attendance records."); el("leaveType").focus(); return; }
   draft = clone(candidateRecord);
   if (!validateInterruptions(candidateRecord)) return;
   const submission = { date:activeDate, candidateRecord:clone(candidateRecord), previous:state.records[activeDate] ? clone(state.records[activeDate]) : null, existed, wasEditMode:editMode };
@@ -464,13 +484,15 @@ function renderCurrentPreview() {
   renderCalculations(calc); renderFortnight(calc, records);
 }
 function renderCalculations(calc) {
+  const seniorOfficer = C.isSeniorOfficer(draft.attendanceType);
+  const balanceLabels = seniorOfficer ? ["Daily SOG Balance", "Progressive SOG Balance"] : ["Daily Flex Balance", "Progressive Flex Balance"];
   if (!fortnightCalculationAllowed()) {
-    metricList("dailyResults", [["Daily Hours", null], ["Daily Flex Balance", null], ["Progressive Flex Balance", null], ["Progressive TOIL Balance", null]]);
+    metricList("dailyResults", [["Daily Hours", null], [balanceLabels[0], null], [balanceLabels[1], null], ["Progressive TOIL Balance", null]]);
     showStatus("Invalid fortnight start date"); return;
   }
   let day = calc[activeDate];
   if (!day) day = C.recalculate({ ...state.records, [activeDate]: draft }, state.settings)[activeDate];
-  metricList("dailyResults", [["Daily Hours", day.daily], ["Daily Flex Balance", day.dailyFlex], ["Progressive Flex Balance", day.progressiveFlex], ["Progressive TOIL Balance", day.progressiveToil]]);
+  metricList("dailyResults", [["Daily Hours", day.daily], [balanceLabels[0], seniorOfficer ? day.dailySog : day.dailyFlex], [balanceLabels[1], seniorOfficer ? day.progressiveSog : day.progressiveFlex], ["Progressive TOIL Balance", day.progressiveToil]]);
   if (day.incomplete) showStatus("Incomplete record — complete both ends of each work segment you started.");
   else if (draftIsDirty()) showStatus("Unsaved changes");
   else showStatus("");
@@ -482,30 +504,36 @@ function updateActionState() {
 function metricList(id, entries) { el(id).innerHTML = entries.map(([label, value, helper]) => `<div><span>${label}</span>${helper ? `<small>${helper}</small>` : ""}<strong>${C.formatDuration(value) || "—"}</strong></div>`).join(""); }
 
 function renderFortnight(calc, records = state.records) {
+  const seniorOfficer = C.isSeniorOfficer(draft.attendanceType);
   if (!fortnightCalculationAllowed()) {
     el("periodDates").textContent = "Invalid fortnight start date";
-    metricList("fortnightResults", [["Standard Hours", null], ["Hours Recorded This Period", null], ["TOIL Balance", null], ["Opening Flex Balance", null, "Carried over from previous fortnight"], ["Net Flex for the Period", null], ["Closing Flex Balance", null, "Carries forward to next fortnight"]]);
+    const label = seniorOfficer ? "SOG" : "Flex";
+    metricList("fortnightResults", [["Standard Hours", null], ["Hours Recorded This Period", null], ["TOIL Balance", null], [`Opening ${label} Balance`, null, "Carried over from previous fortnight"], [`Net ${label} for the Period`, null], [`Closing ${label} Balance`, null, "Carries forward to next fortnight"]]);
     return;
   }
   const period = { start: viewStart, end: C.addDays(viewStart, 13) };
-  let standard = 0, recorded = 0, netFlex = 0, hasIncomplete = false;
+  let standard = 0, recorded = 0, netBalance = 0, hasIncomplete = false;
   for (let current = period.start; current <= period.end; current = C.addDays(current, 1)) {
     standard += C.standardFor(current, state.settings);
-    if (records[current]) { const day = calc[current]; if (day.daily == null) hasIncomplete = true; else { recorded += day.daily; netFlex += day.dailyFlex; } }
+    if (records[current]) { const day = calc[current]; if (day.daily == null) hasIncomplete = true; else { recorded += day.daily; if (C.isSeniorOfficer(records[current].attendanceType) === seniorOfficer) netBalance += seniorOfficer ? day.dailySog : day.dailyFlex; } }
   }
   const datesBefore = Object.keys(calc).filter(d => d < period.start).sort();
   const carriedFlex = datesBefore.length ? calc[datesBefore.at(-1)].progressiveFlex : (C.parseDuration(state.settings.openingFlex) || 0);
   const endDates = Object.keys(calc).filter(d => d <= period.end).sort();
   const endFlex = endDates.length ? calc[endDates.at(-1)].progressiveFlex : carriedFlex;
   const toil = endDates.length ? calc[endDates.at(-1)].progressiveToil : (C.parseDuration(state.settings.openingToil) || 0);
-  el("periodDates").textContent = `${period.start} to ${period.end}${hasIncomplete ? " · excludes incomplete records" : ""}`;
-  metricList("fortnightResults", [["Standard Hours", standard], ["Hours Recorded This Period", recorded], ["TOIL Balance", toil], ["Opening Flex Balance", carriedFlex, "Carried over from previous fortnight"], ["Net Flex for the Period", netFlex], ["Closing Flex Balance", endFlex, "Carries forward to next fortnight"]]);
+  el("periodDates").textContent = `${formatDisplayDate(period.start, "range")} to ${formatDisplayDate(period.end, "range")}${hasIncomplete ? " · excludes incomplete records" : ""}`;
+  if (seniorOfficer) {
+    const priorSogDates = Object.keys(calc).filter(d => d < period.start && calc[d].seniorOfficer).sort();
+    const openingSog = priorSogDates.length ? calc[priorSogDates.at(-1)].progressiveSog : 0;
+    metricList("fortnightResults", [["Standard Hours", standard], ["Hours Recorded This Period", recorded], ["TOIL Balance", toil], ["Opening SOG Balance", openingSog, "Carried over from previous fortnight"], ["Net SOG for the Period", netBalance], ["Closing SOG Balance", openingSog + netBalance, "Carries forward to next fortnight"]]);
+  } else metricList("fortnightResults", [["Standard Hours", standard], ["Hours Recorded This Period", recorded], ["TOIL Balance", toil], ["Opening Flex Balance", carriedFlex, "Carried over from previous fortnight"], ["Net Flex for the Period", netBalance], ["Closing Flex Balance", endFlex, "Carries forward to next fortnight"]]);
 }
 
 function renderRecords(calc) {
   const end = viewStart ? C.addDays(viewStart, 13) : "";
   const dates = Object.keys(state.records).filter(date => viewStart && date >= viewStart && date <= end).sort();
-  el("recordsBody").innerHTML = dates.length ? dates.map(date => { const d = calc[date]; return `<tr><td>${date}</td><td>${d ? C.formatDuration(d.daily) || "Incomplete" : "—"}</td><td>${d ? C.formatDuration(d.dailyFlex) || "—" : "—"}</td><td>${d ? C.formatDuration(d.progressiveFlex) : "—"}</td><td>${d ? C.formatDuration(d.progressiveToil) : "—"}</td><td class="row-actions"><button class="link-button" data-edit="${date}">Edit</button><button class="link-button danger" data-delete="${date}">Delete</button></td></tr>`; }).join("") : `<tr><td colspan="6" class="muted">No records yet.</td></tr>`;
+  el("recordsBody").innerHTML = dates.length ? dates.map(date => { const d = calc[date], senior = C.isSeniorOfficer(state.records[date].attendanceType); return `<tr><td>${formatDisplayDate(date)}</td><td>${d ? C.formatDuration(d.daily) || "Incomplete" : "—"}</td><td>${d ? C.formatDuration(senior ? d.dailySog : d.dailyFlex) || "—" : "—"}</td><td>${d ? C.formatDuration(senior ? d.progressiveSog : d.progressiveFlex) : "—"}</td><td>${d ? C.formatDuration(d.progressiveToil) : "—"}</td><td class="row-actions"><button class="link-button" data-edit="${date}">Edit</button><button class="link-button danger" data-delete="${date}">Delete</button></td></tr>`; }).join("") : `<tr><td colspan="6" class="muted">No records yet.</td></tr>`;
   document.querySelectorAll("[data-edit]").forEach(button => button.addEventListener("click", () => { if (loadRecord(button.dataset.edit, false, "edit")) scrollTo({top:0, behavior:"smooth"}); }));
   document.querySelectorAll("[data-delete]").forEach(button => button.addEventListener("click", () => deleteRecord(button.dataset.delete)));
 }
@@ -559,7 +587,7 @@ function markFortnightSubmitted() {
 }
 
 function renderSettings() {
-  el("attendanceTypeSetting").value = state.settings.attendanceType; el("fortnightStart").value = state.settings.fortnightStart; el("openingFlex").value = state.settings.openingFlex; el("openingToil").value = state.settings.openingToil;
+  el("attendanceTypeSetting").value = displayAttendanceType(state.settings.attendanceType); el("fortnightStart").value = state.settings.fortnightStart; el("openingFlex").value = state.settings.openingFlex; el("openingToil").value = state.settings.openingToil;
   state.settings.standardByDay.forEach((value, index) => el(`standard${index}`).value = value);
   document.querySelectorAll("[data-setting-duration]").forEach(input => setDurationError(input, false));
   originalSettings = settingsSnapshot(); setSettingsStatus(""); updateConfigurationValidity();
@@ -593,7 +621,7 @@ function saveSettings() {
   const previousSettings = state.settings;
   state.settings = JSON.parse(settingsSnapshot()); viewStart = periodFor(activeDate).start;
   if (!save()) { state.settings = previousSettings; setSettingsStatus("Settings could not be saved to localStorage.", true); return; }
-  if (!editMode) { draft.attendanceType = state.settings.attendanceType; originalDraft.attendanceType = state.settings.attendanceType; }
+  if (!editMode) { draft.attendanceType = state.settings.attendanceType; originalDraft.attendanceType = state.settings.attendanceType; updateLeaveTypeOptions(); }
   originalSettings = settingsSnapshot(); renderAll(); setSettingsStatus("Settings saved"); showStatus("Settings saved. All balances have been recalculated."); setSettingsExpanded(false);
 }
 function showStatus(message, error = false) { el("status").textContent = message; el("status").classList.toggle("error", error); }

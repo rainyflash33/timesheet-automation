@@ -69,7 +69,7 @@
 
     <section class="card history-card">
       <div class="section-heading history-heading"><h2>Timesheet History</h2><button id="exportCsv" class="secondary"><span class="desktop-action-label">Export Fortnight CSV</span><span class="mobile-action-label">Export CSV</span></button><button id="emailCsv" class="secondary"><span class="desktop-action-label">Send CSV by Email</span><span class="mobile-action-label">Send by Email</span></button></div>
-      <div class="table-wrap"><table><thead><tr><th>Date</th><th>Daily hours</th><th>Daily flex</th><th>Flex balance</th><th>TOIL balance</th><th></th></tr></thead><tbody id="recordsBody"></tbody></table></div>
+      <div class="table-wrap"><table><thead><tr><th>Date</th><th>Daily hours</th><th>Daily Flex / SOG</th><th>Progressive Flex / SOG</th><th>TOIL balance</th><th></th></tr></thead><tbody id="recordsBody"></tbody></table></div>
     </section>
 
     <section class="card settings">
@@ -83,7 +83,7 @@
           <label>Attendance Type
             <select id="attendanceTypeSetting">
               <option value="Flextime">Flextime</option>
-              <option value="Senior Officer">Senior Officer</option>
+              <option value="Senior Officer A/B">Senior Officer A/B</option>
             </select>
           </label>
           <label>Fortnight start date <input id="fortnightStart" type="date"><span id="fortnightStartError" class="field-error" role="alert" hidden>Fortnight must start on a Thursday.</span></label>
@@ -206,7 +206,7 @@
     </section>
   </div>
   <script src="calculator.js"></script>
-  <script src="app.js?v=attendance-settings-leave-panel-v1"></script>
+  <script src="app.js?v=sog-date-display-v1"></script>
   <script src="pwa-register.js?v=install-clocky-v1"></script>
 </body>
 </html>

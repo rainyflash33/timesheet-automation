@@ -239,15 +239,18 @@
     stored = JSON.parse(localStorage.getItem(STORAGE_KEY));
     assert(stored.records[activeDate].finishTime === "17:21", "new record was not persisted");
     assert(stored.records[activeDate].attendanceType === "Flextime", "new record did not use the saved Attendance Type setting");
-    assert(el("recordsBody").textContent.includes(activeDate), "new record missing from history");
+    assert(el("recordsBody").textContent.includes(formatDisplayDate(activeDate)), "new record missing from history");
     assert(el("submitRecord").textContent === "Submit", "submit did not return to new-record mode");
 
-    setSettingsExpanded(true); change("attendanceTypeSetting", "Senior Officer"); el("saveSettings").click();
+    setSettingsExpanded(true); change("attendanceTypeSetting", "Senior Officer A/B"); el("saveSettings").click();
     stored = JSON.parse(localStorage.getItem(STORAGE_KEY));
-    assert(stored.settings.attendanceType === "Senior Officer" && draft.attendanceType === "Senior Officer", "Attendance Type setting was not saved or applied to new records");
+    assert(stored.settings.attendanceType === "Senior Officer A/B" && draft.attendanceType === "Senior Officer A/B", "Attendance Type setting was not saved or applied to new records");
     assert(stored.records[activeDate].attendanceType === "Flextime", "changing Attendance Type rewrote a historical record");
+    assert(metric("dailyResults", "Daily SOG Balance") !== undefined && metric("dailyResults", "Daily Flex Balance") === undefined, "Senior Officer mode did not replace Flex results with SOG results");
+    assert([...el("leaveType").options].find(option => option.value === "Flex")?.disabled, "Flex Leave remained selectable for Senior Officer A/B");
+    assert(metric("fortnightResults", "Opening SOG Balance") !== undefined && metric("fortnightResults", "Opening Flex Balance") === undefined, "Senior Officer fortnight summary retained Flex-specific labels");
     input("startTime", "0900"); el("clearRecord").click();
-    assert(draft.attendanceType === "Senior Officer" && el("attendanceTypeSetting").value === "Senior Officer" && el("leaveToilPanel").hidden, "Clear reset the persistent Attendance Type setting");
+    assert(draft.attendanceType === "Senior Officer A/B" && el("attendanceTypeSetting").value === "Senior Officer A/B" && el("leaveToilPanel").hidden, "Clear reset the persistent Attendance Type setting");
 
     el("recordsBody").querySelector(`[data-edit="${activeDate}"]`).click();
     assert(draft.attendanceType === "Flextime", "editing a historical record did not preserve its Attendance Type");
@@ -280,6 +283,8 @@
     el("recordsBody").querySelector(`[data-delete="${activeDate}"]`).click();
     stored = JSON.parse(localStorage.getItem(STORAGE_KEY));
     assert(!stored.records[activeDate], "deleted record remains in storage");
+
+    setSettingsExpanded(true); change("attendanceTypeSetting", "Flextime"); el("saveSettings").click();
 
     input("startTime", "0900"); input("lunchOut", "1200"); input("lunchIn", "1300"); input("finishTime", "1721");
     el("toggleInterruptions").click();
@@ -316,13 +321,19 @@
     el("cancelEdit").click();
     el("recordsBody").querySelector(`[data-delete="${activeDate}"]`).click();
 
+    setSettingsExpanded(true); change("attendanceTypeSetting", "Senior Officer A/B"); el("saveSettings").click();
     el("toggleLeaveToil").click(); change("toilHours", "100"); el("submitRecord").click();
     stored = JSON.parse(localStorage.getItem(STORAGE_KEY));
-    assert(stored.records[activeDate].toilHours === "1:00" && stored.records[activeDate].attendanceType === "Senior Officer", "TOIL Hours earned or the new-record Attendance Type was not saved");
+    assert(stored.records[activeDate].toilHours === "1:00" && stored.records[activeDate].attendanceType === "Senior Officer A/B", "TOIL Hours earned or the new-record Attendance Type was not saved");
     assert(metric("dailyResults", "Progressive TOIL Balance") === "1:00", "saved TOIL Hours earned did not update the balance");
     el("recordsBody").querySelector(`[data-edit="${activeDate}"]`).click();
     assert(!el("leaveToilPanel").hidden && el("toilHours").value === "1:00", "editing a TOIL record did not reveal its saved value");
     el("cancelEdit").click(); el("recordsBody").querySelector(`[data-delete="${activeDate}"]`).click();
+
+    assert(formatDisplayDate("2026-08-20") === "20-08-2026 Thu", "Thursday history date formatting is incorrect");
+    assert(formatDisplayDate("2026-08-21") === "21-08-2026 Fri", "Friday history date formatting is incorrect");
+    assert(formatDisplayDate("2026-08-23") === "23-08-2026 Sun", "Sunday history date formatting is incorrect");
+    assert(`${formatDisplayDate("2026-08-20", "range")} to ${formatDisplayDate("2026-09-02", "range")}` === "20 Aug 2026 to 2 Sep 2026", "fortnight range date formatting is incorrect");
 
     const csvPackage = buildCsvPackage(viewStart);
     assert(csvPackage.rows.length === 15 && csvPackage.filename.endsWith(".csv"), "email CSV package does not contain the existing 14-day export");
@@ -342,13 +353,14 @@
     const rows = [...el("basicFields").children].map(node => node.getBoundingClientRect().top);
     assert(rows.every((top, index) => index === 0 || top > rows[index - 1]), "daily time fields are not vertically ordered");
     if (innerWidth >= 768 && innerWidth <= 1180) {
+      setSettingsExpanded(true);
       const settingsInputs = [el("attendanceTypeSetting"), el("fortnightStart"), el("openingFlex"), el("openingToil")];
       const settingsTops = settingsInputs.map(input => Math.round(input.getBoundingClientRect().top));
       const settingsWidths = settingsInputs.map(input => Math.round(input.getBoundingClientRect().width));
       const settingsHeights = settingsInputs.map(input => Math.round(input.getBoundingClientRect().height));
       assert(new Set(settingsTops).size === 1, "tablet Settings fields are not on the same row");
       assert(Math.max(...settingsWidths) - Math.min(...settingsWidths) <= 1, "tablet Settings fields are not evenly balanced");
-      assert(settingsHeights.join(",") === "38,36,38,38", "tablet Settings input heights are incorrect");
+      assert(settingsHeights.join(",") === "38,36,38,38", `tablet Settings input heights are incorrect: ${settingsHeights.join(",")}`);
     }
     if (innerWidth <= 600) assert(Math.round(parseFloat(getComputedStyle(el("fortnightStart")).height)) === 48, "mobile Fortnight Start Date is not 48px high");
     window.scrollTo(0, 0);

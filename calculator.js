@@ -38,6 +38,10 @@
     return { minutes: minutes == null ? 0 : minutes, incomplete: minutes == null };
   }
 
+  function isSeniorOfficer(attendanceType) {
+    return attendanceType === "Senior Officer A/B" || attendanceType === "Senior Officer";
+  }
+
   function calculateDay(record, standardMinutes) {
     let morningSegments;
     if (record.morningOut || record.morningIn) {
@@ -67,8 +71,11 @@
     const toil = parseDuration(record.toilHours);
     const valid = !morningIncomplete && !afternoonIncomplete && leave != null && toil != null;
     const daily = valid ? morning + afternoon + leave : null;
-    const dailyFlex = valid ? daily - standardMinutes - toil : null;
-    return { morning, afternoon, daily, dailyFlex, toilEarned: toil, incomplete: !valid };
+    const dailyBalance = valid ? daily - standardMinutes - toil : null;
+    const seniorOfficer = isSeniorOfficer(record.attendanceType);
+    const dailyFlex = seniorOfficer ? null : dailyBalance;
+    const dailySog = seniorOfficer ? dailyBalance : null;
+    return { morning, afternoon, daily, dailyFlex, dailySog, toilEarned: toil, incomplete: !valid };
   }
 
   function dateFromISO(iso) { const [y, m, d] = iso.split("-").map(Number); return new Date(y, m - 1, d); }
@@ -79,17 +86,23 @@
 
   function recalculate(records, settings) {
     let flex = parseDuration(settings.openingFlex) || 0;
+    let sog = 0;
     let toil = parseDuration(settings.openingToil) || 0;
     const calculated = {};
     Object.keys(records).sort().forEach(date => {
       const day = calculateDay(records[date], standardFor(date, settings));
-      if (day.dailyFlex != null) flex += day.dailyFlex;
-      const flexUsed = records[date].leaveType === "Flex" ? parseDuration(records[date].leaveHours) : 0;
-      if (flexUsed != null) flex -= flexUsed;
+      const seniorOfficer = isSeniorOfficer(records[date].attendanceType);
+      if (seniorOfficer) {
+        if (day.dailySog != null) sog += day.dailySog;
+      } else {
+        if (day.dailyFlex != null) flex += day.dailyFlex;
+        const flexUsed = records[date].leaveType === "Flex" ? parseDuration(records[date].leaveHours) : 0;
+        if (flexUsed != null) flex -= flexUsed;
+      }
       if (day.toilEarned != null) toil += day.toilEarned;
       const used = records[date].leaveType === "Time off in Lieu (TOIL)" ? parseDuration(records[date].leaveHours) : 0;
       if (used != null) toil -= used;
-      calculated[date] = { ...day, progressiveFlex: flex, progressiveToil: toil };
+      calculated[date] = { ...day, progressiveFlex: flex, progressiveSog: sog, progressiveToil: toil, seniorOfficer };
     });
     return calculated;
   }
@@ -127,5 +140,5 @@
     return starts;
   }
 
-  return { TIME_KEYS, parseDuration, formatDuration, calculateDay, recalculate, fortnightFor, standardFor, addDays, isThursdayISO, buildFortnightExportRows, fortnightsOverlappingMonth };
+  return { TIME_KEYS, parseDuration, formatDuration, calculateDay, recalculate, fortnightFor, standardFor, addDays, isThursdayISO, isSeniorOfficer, buildFortnightExportRows, fortnightsOverlappingMonth };
 });

@@ -64,6 +64,22 @@ const eightHourWorkday = {
 day = C.calculateDay(eightHourWorkday, 441);
 assert.deepEqual([day.daily, day.dailyFlex], [480, 39]);
 
+// Senior Officer A/B uses a separate SOG balance and keeps TOIL independent.
+const sogDay = {...eightHourWorkday, attendanceType:"Senior Officer A/B"};
+day = C.calculateDay(sogDay, 441);
+assert.deepEqual([day.daily, day.dailySog, day.dailyFlex], [480, 39, null]);
+day = C.calculateDay({...sogDay, toilHours:"0:30"}, 441);
+assert.deepEqual([day.daily, day.dailySog, day.toilEarned], [480, 9, 30]);
+const mixedBalances = C.recalculate({
+  "2026-08-20": {...eightHourWorkday, attendanceType:"Flextime"},
+  "2026-08-21": {...sogDay, toilHours:"0:30"},
+  "2026-08-24": {...sogDay}
+}, {...settings, openingFlex:"0:00", openingToil:"0:00"});
+assert.deepEqual([mixedBalances["2026-08-20"].progressiveFlex, mixedBalances["2026-08-21"].progressiveSog, mixedBalances["2026-08-24"].progressiveSog], [39, 9, 48]);
+assert.equal(mixedBalances["2026-08-21"].progressiveToil, 30);
+assert.equal(C.isSeniorOfficer("Senior Officer"), true);
+assert.equal(C.isSeniorOfficer("Senior Officer A/B"), true);
+
 const flexLeaveDate = "2026-08-20";
 let flexBalances = C.recalculate(
   {[flexLeaveDate]: {...fullDayAnnualLeave, leaveType:"Flex"}},
