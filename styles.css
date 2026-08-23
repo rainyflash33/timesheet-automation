@@ -51,8 +51,7 @@ button:hover { background: #56378f; }
 .link-button:hover { background: transparent; color: #4f3188; }
 .danger { color: #a32d2d; }
 .danger-zone { margin-top: 24px; padding-top: 18px; border-top: 1px solid #dfd5e8; }
-.danger-zone h3 { margin: 0 0 6px; color: #862727; }
-.danger-zone p { margin: 0 0 12px; color: #675e70; }
+.danger-zone-title { margin: 0 0 12px; color: #675e70; font-weight: 700; }
 .danger-button { background: #a32d2d; color: #fff; }
 .danger-button:hover { background: #862323; }
 .danger-button:disabled { background: #c9bfc8; cursor: not-allowed; }

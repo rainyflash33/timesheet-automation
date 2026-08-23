@@ -69,7 +69,7 @@
 
     <section class="card history-card">
       <div class="section-heading history-heading"><h2>Timesheet History</h2><button id="exportCsv" class="secondary"><span class="desktop-action-label">Export Fortnight CSV</span><span class="mobile-action-label">Export CSV</span></button><button id="emailCsv" class="secondary"><span class="desktop-action-label">Send CSV by Email</span><span class="mobile-action-label">Send by Email</span></button></div>
-      <div class="table-wrap"><table><thead><tr><th>Date</th><th>Daily hours</th><th>Daily Flex / SOG</th><th>Progressive Flex / SOG</th><th>TOIL balance</th><th></th></tr></thead><tbody id="recordsBody"></tbody></table></div>
+      <div class="table-wrap"><table><thead><tr><th>Date</th><th>Daily hours</th><th id="dailyBalanceHeading">Daily Flex</th><th id="progressiveBalanceHeading">Progressive Flex</th><th>TOIL balance</th><th></th></tr></thead><tbody id="recordsBody"></tbody></table></div>
     </section>
 
     <section class="card settings">
@@ -94,8 +94,7 @@
         <div id="weekdaySettings" class="weekday-grid"></div>
         <div class="record-actions"><button id="saveSettings">Save settings</button><span id="settingsStatus" class="inline-status" role="status" aria-live="polite"></span></div>
         <div class="danger-zone">
-          <h3>Danger Zone</h3>
-          <p>Delete all saved timesheet records and submission history from this device.</p>
+          <p class="danger-zone-title">Delete All Saved Timesheet Records</p>
           <button id="openResetHistory" class="danger-button" type="button">Reset Timesheet History</button>
         </div>
       </div>
@@ -225,7 +224,7 @@
     </section>
   </div>
   <script src="calculator.js"></script>
-  <script src="app.js?v=reset-history-v1"></script>
+  <script src="app.js?v=dynamic-history-labels-v1"></script>
   <script src="pwa-register.js?v=install-clocky-v1"></script>
 </body>
 </html>

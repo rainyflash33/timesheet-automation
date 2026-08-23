@@ -25,6 +25,9 @@
     assert(el("leaveToilPanel").hidden && el("toggleLeaveToil").getAttribute("aria-expanded") === "false", "new-record Leave / TOIL panel did not start collapsed");
     assert(!el("attendanceType") && el("attendanceTypeSetting").value === "Flextime", "Attendance Type was not moved from the daily form into Settings");
     assert([...document.querySelector(".settings .form-grid").querySelectorAll("label")].slice(0, 4).map(label => label.childNodes[0].textContent.trim()).join("|") === "Attendance Type|Fortnight start date|Opening Flex Balance|Opening TOIL Balance", "Settings fields are not in the required order");
+    assert(el("dailyBalanceHeading").textContent === "Daily Flex" && el("progressiveBalanceHeading").textContent === "Progressive Flex", "Flextime history headings are incorrect");
+    assert(!document.querySelector(".danger-zone h3") && document.querySelector(".danger-zone-title").textContent === "Delete All Saved Timesheet Records", "reset section cosmetic title is incorrect");
+    assert(getComputedStyle(document.querySelector(".danger-zone")).borderTopStyle !== "none", "reset section divider was removed");
 
     assert(!el("welcomeModal").hidden, "welcome disclaimer did not open on page load");
     assert(el("welcomeModal").textContent.includes("Clocky is for personal use only.") && el("welcomeModal").textContent.includes("Please do not enter any confidential, sensitive, or work-related information."), "welcome disclaimer text is incorrect");
@@ -290,6 +293,7 @@
     assert(stored.settings.attendanceType === "Senior Officer A/B" && draft.attendanceType === "Senior Officer A/B", "Attendance Type setting was not saved or applied to new records");
     assert(stored.records[workflowRecordDate].attendanceType === "Flextime", "changing Attendance Type rewrote a historical record");
     assert(metric("dailyResults", "Daily SOG Balance") !== undefined && metric("dailyResults", "Daily Flex Balance") === undefined, "Senior Officer mode did not replace Flex results with SOG results");
+    assert(el("dailyBalanceHeading").textContent === "Daily SOG" && el("progressiveBalanceHeading").textContent === "Progressive SOG", "Senior Officer history headings are incorrect");
     assert([...el("leaveType").options].find(option => option.value === "Flex")?.disabled, "Flex Leave remained selectable for Senior Officer A/B");
     assert(metric("fortnightResults", "Opening SOG Balance") !== undefined && metric("fortnightResults", "Opening Flex Balance") === undefined, "Senior Officer fortnight summary retained Flex-specific labels");
     input("startTime", "0900"); el("clearRecord").click();
@@ -297,6 +301,7 @@
 
     el("recordsBody").querySelector(`[data-edit="${workflowRecordDate}"]`).click();
     assert(draft.attendanceType === "Flextime", "editing a historical record did not preserve its Attendance Type");
+    assert(el("dailyBalanceHeading").textContent === "Daily Flex" && el("progressiveBalanceHeading").textContent === "Progressive Flex", "historical Flextime edit did not restore Flex headings");
     input("finishTime", "17:41");
     input("fortnightStart", "2026-08-21");
     const beforeBlockedSave = localStorage.getItem(STORAGE_KEY);

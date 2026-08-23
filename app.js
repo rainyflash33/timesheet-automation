@@ -556,6 +556,9 @@ function renderFortnight(calc, records = state.records) {
 }
 
 function renderRecords(calc) {
+  const balanceLabel = C.isSeniorOfficer(draft.attendanceType) ? "SOG" : "Flex";
+  el("dailyBalanceHeading").textContent = `Daily ${balanceLabel}`;
+  el("progressiveBalanceHeading").textContent = `Progressive ${balanceLabel}`;
   const end = viewStart ? C.addDays(viewStart, 13) : "";
   const dates = Object.keys(state.records).filter(date => viewStart && date >= viewStart && date <= end).sort();
   el("recordsBody").innerHTML = dates.length ? dates.map(date => { const d = calc[date], senior = C.isSeniorOfficer(state.records[date].attendanceType); return `<tr><td>${formatDisplayDate(date)}</td><td>${d ? C.formatDuration(d.daily) || "Incomplete" : "—"}</td><td>${d ? C.formatDuration(senior ? d.dailySog : d.dailyFlex) || "—" : "—"}</td><td>${d ? C.formatDuration(senior ? d.progressiveSog : d.progressiveFlex) : "—"}</td><td>${d ? C.formatDuration(d.progressiveToil) : "—"}</td><td class="row-actions"><button class="link-button" data-edit="${date}">Edit</button><button class="link-button danger" data-delete="${date}">Delete</button></td></tr>`; }).join("") : `<tr><td colspan="6" class="muted">No records yet.</td></tr>`;
