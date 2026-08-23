@@ -393,6 +393,39 @@
     assert(el("emailStatus").textContent.includes("Please attach the downloaded CSV"), "fallback attachment message is missing");
     closeEmailModal();
 
+    // Destructive history reset preserves Settings but removes every historical source of balances.
+    state.settings.attendanceType = "Flextime";
+    state.settings.openingFlex = "10:00";
+    state.settings.openingToil = "2:00";
+    state.settings.standardByDay[1] = "7:00";
+    const resetWorkday = {...emptyRecord("Flextime"), startTime:"09:00", lunchOut:"13:00", lunchIn:"14:00", finishTime:"18:00"};
+    state.records = {"2026-08-20":clone(resetWorkday), "2026-08-21":clone(resetWorkday)};
+    state.submissions = {"2026-08-20":{submitted:true, changed:false}};
+    save(); loadRecord("2026-08-21", true, "edit"); input("finishTime", "18:15");
+    pendingRecordSubmission = {date:"2026-08-22", candidateRecord:clone(resetWorkday)};
+    assert(Object.keys(state.records).length === 2 && C.recalculate(state.records, state.settings)["2026-08-21"].progressiveFlex > C.parseDuration(state.settings.openingFlex), "reset test history did not contain derived balances");
+    setSettingsExpanded(true); el("openResetHistory").click();
+    assert(!el("resetHistoryModal").hidden && el("confirmResetHistory").disabled, "Reset History modal or initial safety lock is missing");
+    modalRect = el("resetHistoryModal").querySelector(".dialog-card").getBoundingClientRect();
+    assert(modalRect.left >= 0 && modalRect.right <= innerWidth && modalRect.height <= innerHeight, "Reset History modal is not contained by the viewport");
+    input("resetHistoryConfirmation", "reset"); assert(el("confirmResetHistory").disabled, "lowercase reset enabled the destructive action");
+    el("cancelResetHistory").click(); assert(Object.keys(state.records).length === 2, "Cancel deleted timesheet history");
+    el("openResetHistory").click(); input("resetHistoryConfirmation", "RESET");
+    assert(!el("confirmResetHistory").disabled, "typing RESET did not enable the final action"); el("confirmResetHistory").click();
+    stored = JSON.parse(localStorage.getItem(STORAGE_KEY));
+    assert(Object.keys(state.records).length === 0 && Object.keys(stored.records).length === 0 && el("recordsBody").textContent.includes("No records yet"), "Reset did not remove all records and Timesheet History");
+    assert(Object.keys(state.submissions).length === 0 && Object.keys(stored.submissions).length === 0, "Reset did not remove fortnight submission statuses");
+    assert(!editMode && pendingRecordSubmission === null && recordsEqual(draft, emptyRecord("Flextime")) && el("leaveToilPanel").hidden, "Reset did not clear draft, edit, confirmation, or optional-entry state");
+    assert(state.settings.standardByDay[1] === "7:00" && stored.settings.standardByDay[1] === "7:00", "Reset changed Standard Hours");
+    assert(Object.keys(C.recalculate(state.records, state.settings)).length === 0, "old progressive balances remained after reset");
+    setSettingsExpanded(true); change("openingFlex", "2:00"); change("openingToil", "0:00"); el("saveSettings").click();
+    loadRecord("2026-08-24", true); input("startTime", "0900"); input("lunchOut", "1300"); input("lunchIn", "1400"); input("finishTime", "1800");
+    const firstPostResetDate = activeDate; el("submitRecord").click();
+    const postResetCalc = C.recalculate(state.records, state.settings);
+    assert(postResetCalc[firstPostResetDate].progressiveFlex === 180, "new record did not calculate solely from the new Opening Flex Balance");
+    const refreshedAfterReset = load();
+    assert(Object.keys(refreshedAfterReset.records).join() === firstPostResetDate && !refreshedAfterReset.records["2026-08-20"] && refreshedAfterReset.settings.standardByDay[1] === "7:00", "refresh restored deleted history or lost preserved Settings");
+
     const rows = [...el("basicFields").children].map(node => node.getBoundingClientRect().top);
     assert(rows.every((top, index) => index === 0 || top > rows[index - 1]), "daily time fields are not vertically ordered");
     if (innerWidth >= 768 && innerWidth <= 1180) {

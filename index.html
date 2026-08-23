@@ -93,6 +93,11 @@
         <h3>Standard hours by day</h3>
         <div id="weekdaySettings" class="weekday-grid"></div>
         <div class="record-actions"><button id="saveSettings">Save settings</button><span id="settingsStatus" class="inline-status" role="status" aria-live="polite"></span></div>
+        <div class="danger-zone">
+          <h3>Danger Zone</h3>
+          <p>Delete all saved timesheet records and submission history from this device.</p>
+          <button id="openResetHistory" class="danger-button" type="button">Reset Timesheet History</button>
+        </div>
       </div>
     </section>
 
@@ -205,8 +210,22 @@
       <div class="modal-actions"><button id="dismissInstallModal" type="button">Got it</button></div>
     </section>
   </div>
+  <div id="resetHistoryModal" class="modal-backdrop" hidden>
+    <section class="dialog-card reset-history-modal" role="dialog" aria-modal="true" aria-labelledby="resetHistoryTitle" aria-describedby="resetHistoryDescription">
+      <h2 id="resetHistoryTitle">Reset Timesheet History?</h2>
+      <div id="resetHistoryDescription">
+        <p>This will permanently delete all saved timesheet records and historical calculations from this device.</p>
+        <p>Your standard hours and general settings will be kept.</p>
+        <p>After resetting, you can enter a new Opening Flex Balance and Opening TOIL Balance to start again.</p>
+      </div>
+      <label class="reset-confirm-label">Type <strong>RESET</strong> to confirm
+        <input id="resetHistoryConfirmation" type="text" autocomplete="off" autocapitalize="characters" spellcheck="false">
+      </label>
+      <div class="modal-actions"><button id="cancelResetHistory" class="secondary" type="button">Cancel</button><button id="confirmResetHistory" class="danger-button" type="button" disabled>Reset History</button></div>
+    </section>
+  </div>
   <script src="calculator.js"></script>
-  <script src="app.js?v=submit-only-completeness-v1"></script>
+  <script src="app.js?v=reset-history-v1"></script>
   <script src="pwa-register.js?v=install-clocky-v1"></script>
 </body>
 </html>

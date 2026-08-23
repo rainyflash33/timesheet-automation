@@ -115,6 +115,11 @@ function buildUI() {
   el("toggleLeaveToil").addEventListener("click", () => setLeaveToilExpanded(el("leaveToilPanel").hidden));
   el("cancelEdit").addEventListener("click", cancelEdit);
   el("saveSettings").addEventListener("click", saveSettings);
+  el("openResetHistory").addEventListener("click", openResetHistoryModal);
+  el("cancelResetHistory").addEventListener("click", closeResetHistoryModal);
+  el("confirmResetHistory").addEventListener("click", resetTimesheetHistory);
+  el("resetHistoryConfirmation").addEventListener("input", () => { el("confirmResetHistory").disabled = el("resetHistoryConfirmation").value !== "RESET"; });
+  el("resetHistoryModal").addEventListener("click", event => { if (event.target === el("resetHistoryModal")) closeResetHistoryModal(); });
   el("settingsToggle").addEventListener("click", () => setSettingsExpanded(el("settingsContent").hidden));
   el("settingsToggle").addEventListener("keydown", event => {
     if (event.key === "Enter" || event.key === " ") {
@@ -643,6 +648,40 @@ function saveSettings() {
   if (!save()) { state.settings = previousSettings; setSettingsStatus("Settings could not be saved to localStorage.", true); return; }
   if (!editMode) { draft.attendanceType = state.settings.attendanceType; originalDraft.attendanceType = state.settings.attendanceType; updateLeaveTypeOptions(); }
   originalSettings = settingsSnapshot(); renderAll(); setSettingsStatus("Settings saved"); showStatus("Settings saved. All balances have been recalculated."); setSettingsExpanded(false);
+}
+function openResetHistoryModal() {
+  el("resetHistoryConfirmation").value = "";
+  el("confirmResetHistory").disabled = true;
+  el("resetHistoryModal").hidden = false;
+  el("resetHistoryConfirmation").focus();
+}
+function closeResetHistoryModal() {
+  el("resetHistoryModal").hidden = true;
+  el("resetHistoryConfirmation").value = "";
+  el("confirmResetHistory").disabled = true;
+}
+function resetTimesheetHistory() {
+  if (el("resetHistoryConfirmation").value !== "RESET") return;
+  const previousState = state;
+  state = { records:{}, submissions:{}, settings:clone(state.settings) };
+  if (!save()) { state = previousState; return; }
+  pendingRecordSubmission = null;
+  reminderStart = "";
+  editMode = false;
+  editingInterruption = "";
+  originalInterruptionEditor = "";
+  draft = emptyRecord(state.settings.attendanceType);
+  originalDraft = clone(draft);
+  if (validAnchor()) viewStart = periodFor(activeDate).start;
+  fillForm(draft);
+  closeInterruptionEditor();
+  renderInterruptionList();
+  setLeaveToilExpanded(false);
+  closeWorkConfirmation();
+  closeResetHistoryModal();
+  renderSettings();
+  renderAll();
+  showStatus("Timesheet history reset. Enter verified opening balances in Settings to start again.");
 }
 function showStatus(message, error = false) { el("status").textContent = message; el("status").classList.toggle("error", error); }
 

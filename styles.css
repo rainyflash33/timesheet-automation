@@ -50,6 +50,12 @@ button:hover { background: #56378f; }
 .link-button { min-height: auto; background: transparent; color: #6848a8; padding: 4px; }
 .link-button:hover { background: transparent; color: #4f3188; }
 .danger { color: #a32d2d; }
+.danger-zone { margin-top: 24px; padding-top: 18px; border-top: 1px solid #dfd5e8; }
+.danger-zone h3 { margin: 0 0 6px; color: #862727; }
+.danger-zone p { margin: 0 0 12px; color: #675e70; }
+.danger-button { background: #a32d2d; color: #fff; }
+.danger-button:hover { background: #862323; }
+.danger-button:disabled { background: #c9bfc8; cursor: not-allowed; }
 .record-actions { display: flex; gap: 10px; margin-top: 18px; }
 .inline-status { align-self: center; color: #6848a8; font-size: .85rem; font-weight: 700; }
 .inline-status.error { color: #a32d2d; }
@@ -71,6 +77,9 @@ button:hover { background: #56378f; }
 .email-modal h2, .dialog-card h2 { margin: 0; }
 .welcome-modal { width: min(440px, 100%); }
 .welcome-modal p { margin: 18px 0 0; color: #514a5c; line-height: 1.55; }
+.reset-history-modal { width: min(500px, 100%); }
+.reset-history-modal p { color: #514a5c; line-height: 1.5; }
+.reset-confirm-label { display: grid; gap: 7px; margin-top: 18px; color: #514a5c; }
 .feedback-form { display: grid; gap: 16px; margin-top: 20px; }
 .rating-field { min-width: 0; margin: 0; padding: 0; border: 0; }
 .rating-field legend { margin-bottom: 8px; color: #514a5c; font-size: .82rem; font-weight: 650; }
