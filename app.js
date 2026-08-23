@@ -8,9 +8,9 @@ const FIELD_GROUPS = {
 const RECORD_FIELDS = [...C.TIME_KEYS, "leaveType", "leaveHours", "attendanceType", "toilHours"];
 const DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 const todayISO = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`; };
-const defaults = { records: {}, submissions: {}, settings: { attendanceType: "Flextime", fortnightStart: "", openingFlex: "0:00", openingToil: "0:00", standardByDay: ["0:00", "7:21", "7:21", "7:21", "7:21", "7:21", "0:00"] } };
+const defaults = { records: {}, submissions: {}, drafts: {}, activeDraftDate:"", settings: { attendanceType: "Flextime", fortnightStart: "", openingFlex: "0:00", openingToil: "0:00", standardByDay: ["0:00", "7:21", "7:21", "7:21", "7:21", "7:21", "0:00"] } };
 let state = load();
-let activeDate = todayISO();
+let activeDate = state.activeDraftDate && state.drafts[state.activeDraftDate] ? state.activeDraftDate : todayISO();
 let viewStart = "";
 let draft = emptyRecord(state.settings.attendanceType);
 let originalDraft = emptyRecord(state.settings.attendanceType);
@@ -18,8 +18,7 @@ let originalSettings = "";
 let reminderStart = "";
 let filterYear = new Date().getFullYear();
 let filterMonth = new Date().getMonth() + 1;
-let editingInterruption = "";
-let originalInterruptionEditor = "";
+let interruptionEditorSequence = 0;
 let originalLeaveToil = null;
 let editMode = false;
 let pendingRecordSubmission = null;
@@ -29,7 +28,7 @@ function el(id) { return document.getElementById(id); }
 function load() {
   try {
     const saved = JSON.parse(localStorage.getItem(STORAGE_KEY));
-    return saved ? { records: saved.records || {}, submissions: saved.submissions || {}, settings: { ...defaults.settings, ...saved.settings } } : clone(defaults);
+    return saved ? { records: saved.records || {}, submissions: saved.submissions || {}, drafts: saved.drafts || {}, activeDraftDate: saved.activeDraftDate || "", settings: { ...defaults.settings, ...saved.settings } } : clone(defaults);
   } catch { return clone(defaults); }
 }
 function save() {
@@ -70,8 +69,9 @@ function ensureValidAnchor() {
   return true;
 }
 function recordsEqual(a, b) { return JSON.stringify(a) === JSON.stringify(b); }
-function interruptionEditorSnapshot() { return el("interruptionEditor")?.hidden ? "" : JSON.stringify([el("interruptionOut").value, el("interruptionIn").value]); }
-function interruptionEditorIsDirty() { return interruptionEditorSnapshot() !== originalInterruptionEditor; }
+function interruptionEditorIsDirty() {
+  return [...document.querySelectorAll(".interruption-editor")].some(editor => editor.querySelector("[data-interruption-out]").value !== editor.dataset.originalOut || editor.querySelector("[data-interruption-in]").value !== editor.dataset.originalIn);
+}
 function draftIsDirty() { return !recordsEqual(draft, originalDraft) || interruptionEditorIsDirty(); }
 function settingsAreDirty() { return settingsSnapshot() !== originalSettings; }
 
@@ -85,12 +85,8 @@ function buildUI() {
   DAY_NAMES.forEach((name, index) => {
     const label = document.createElement("label"); label.innerHTML = `${name}<input id="standard${index}" data-duration data-setting-duration inputmode="numeric" placeholder="HMM" aria-describedby="standard${index}Error"><span id="standard${index}Error" class="field-error" role="alert" hidden>Use digits such as 721; minutes must be 00–59.</span>`; el("weekdaySettings").append(label);
   });
-  el("interruptionInputs").innerHTML = [["interruptionOut", "Time Out"], ["interruptionIn", "Time In"]].map(([id, label]) => `<div class="time-row"><label for="${id}">${label}</label><input id="${id}" class="clock-time" data-interruption-time type="text" inputmode="numeric" maxlength="5" pattern="(?:[01]\\d|2[0-3]):[0-5]\\d" placeholder="HHMM" aria-describedby="${id}Error"><button data-interruption-now="${id}">Now</button><span id="${id}Error" class="time-error" hidden>Enter a valid time from 0000 to 2359.</span></div>`).join("");
   document.querySelectorAll("[data-stamp]").forEach(button => button.addEventListener("click", () => {
     const now = new Date(), input = el(button.dataset.stamp); input.value = `${String(now.getHours()).padStart(2,"0")}:${String(now.getMinutes()).padStart(2,"0")}`; setClockError(input, false); updateDraft();
-  }));
-  document.querySelectorAll("[data-interruption-now]").forEach(button => button.addEventListener("click", () => {
-    const now = new Date(), input = el(button.dataset.interruptionNow); input.value = `${String(now.getHours()).padStart(2,"0")}:${String(now.getMinutes()).padStart(2,"0")}`; setClockError(input, false);
   }));
   document.querySelectorAll(".clock-time").forEach(input => {
     input.addEventListener("input", () => { formatClockInput(input); if (input.dataset.recordTime != null) updateDraft(); });
@@ -109,8 +105,8 @@ function buildUI() {
   el("filterYear").addEventListener("change", () => changePeriodFilter(Number(el("filterYear").value), filterMonth));
   el("filterMonth").addEventListener("change", () => changePeriodFilter(filterYear, Number(el("filterMonth").value)));
   el("toggleInterruptions").addEventListener("click", () => openInterruptionEditor());
-  el("cancelInterruption").addEventListener("click", closeInterruptionEditor);
   el("submitRecord").addEventListener("click", submitRecord);
+  el("saveDraft").addEventListener("click", saveDraft);
   el("clearRecord").addEventListener("click", clearRecordForm);
   el("toggleLeaveToil").addEventListener("click", () => setLeaveToilExpanded(el("leaveToilPanel").hidden));
   el("cancelLeaveToil").addEventListener("click", cancelLeaveToil);
@@ -222,9 +218,14 @@ function updateDraft() { draft = readForm(); renderCurrentPreview(); updateActio
 
 function clearRecordForm() {
   const current = readForm();
-  const editorHasData = Boolean(el("interruptionOut").value || el("interruptionIn").value);
-  if (recordsEqual(current, emptyRecord(state.settings.attendanceType)) && !editorHasData) { setLeaveToilExpanded(false); return; }
+  const editorHasData = [...document.querySelectorAll("[data-interruption-time]")].some(input => input.value);
+  const savedDraft = state.drafts[activeDate] ? clone(state.drafts[activeDate]) : null;
+  const previousActiveDraftDate = state.activeDraftDate;
+  const hadSavedDraft = removeSavedDraft(activeDate);
+  if (hadSavedDraft && !save()) { state.drafts[activeDate] = savedDraft; state.activeDraftDate = previousActiveDraftDate; return; }
+  if (recordsEqual(current, emptyRecord(state.settings.attendanceType)) && !editorHasData) { setLeaveToilExpanded(false); if (hadSavedDraft) showStatus("Draft cleared"); return; }
   draft = emptyRecord(state.settings.attendanceType);
+  if (!editMode) originalDraft = clone(draft);
   fillForm(draft);
   closeInterruptionEditor();
   renderInterruptionList();
@@ -233,21 +234,67 @@ function clearRecordForm() {
   updateActionState();
 }
 
-function openInterruptionEditor(slot = "") {
-  if (!slot && (draft.morningOut || draft.morningIn) && (draft.afternoonOut || draft.afternoonIn)) return;
-  editingInterruption = slot;
-  el("interruptionEditorTitle").textContent = `${slot ? `${slot === "morning" ? "Morning" : "Afternoon"} ` : ""}Additional Time Entry`;
-  el("interruptionOut").value = slot ? draft[`${slot}Out`] || "" : "";
-  el("interruptionIn").value = slot ? draft[`${slot}In`] || "" : "";
-  el("interruptionEditor").hidden = false;
-  originalInterruptionEditor = interruptionEditorSnapshot();
-  el("interruptionOut").focus();
+function removeSavedDraft(date) {
+  if (!state.drafts[date]) return false;
+  delete state.drafts[date];
+  if (state.activeDraftDate === date) state.activeDraftDate = Object.keys(state.drafts).slice(-1)[0] || "";
+  return true;
 }
-function closeInterruptionEditor() {
-  editingInterruption = ""; el("interruptionEditor").hidden = true;
-  el("interruptionOut").value = ""; el("interruptionIn").value = "";
-  document.querySelectorAll("[data-interruption-time]").forEach(input => setClockError(input, false));
-  originalInterruptionEditor = "";
+
+function saveDraft() {
+  if (!validateClockInputs("[data-record-time]")) return;
+  if (!validateDurationInputs("[data-record-duration]")) return;
+  draft = readForm();
+  if (!stageInterruptionEditors()) return;
+  const candidateDraft = readForm();
+  if (C.isSeniorOfficer(candidateDraft.attendanceType) && candidateDraft.leaveType === "Flex") { alert("Flex Leave is not available for Senior Officer A/B attendance records."); el("leaveType").focus(); return; }
+  if (!validateLeaveToil(candidateDraft)) return;
+  const previousDraft = state.drafts[activeDate] ? clone(state.drafts[activeDate]) : null;
+  const previousActiveDraftDate = state.activeDraftDate;
+  state.drafts[activeDate] = { record:clone(candidateDraft), editMode:Boolean(editMode), leaveToilExpanded:!el("leaveToilPanel").hidden };
+  state.activeDraftDate = activeDate;
+  if (!save()) {
+    if (previousDraft) state.drafts[activeDate] = previousDraft; else delete state.drafts[activeDate];
+    state.activeDraftDate = previousActiveDraftDate;
+    return;
+  }
+  draft = clone(candidateDraft); originalDraft = clone(draft);
+  renderAll(); showStatus("Draft saved");
+}
+
+function openInterruptionEditor(slot = "") {
+  if (slot && document.querySelector(`.interruption-editor[data-slot="${slot}"]`)) return;
+  if (!slot && interruptionEntryCount() >= 2) return;
+  const id = ++interruptionEditorSequence;
+  const out = slot ? draft[`${slot}Out`] || "" : "", incoming = slot ? draft[`${slot}In`] || "" : "";
+  const editor = document.createElement("div"); editor.className = "interruption-editor"; editor.dataset.editorId = String(id); editor.dataset.slot = slot; editor.dataset.originalOut = out; editor.dataset.originalIn = incoming;
+  editor.innerHTML = `<h3>Additional Time Entry</h3><div class="interruption-inputs">${[["out", "Time Out"], ["in", "Time In"]].map(([kind, label]) => { const inputId = `interruption${kind === "out" ? "Out" : "In"}${id}`; return `<div class="time-row"><label for="${inputId}">${label}</label><input id="${inputId}" class="clock-time" data-interruption-time data-interruption-${kind} type="text" inputmode="numeric" maxlength="5" pattern="(?:[01]\\d|2[0-3]):[0-5]\\d" placeholder="HHMM" aria-describedby="${inputId}Error"><button data-interruption-now="${inputId}">Now</button><span id="${inputId}Error" class="time-error" hidden>Enter a valid time from 0000 to 2359.</span></div>`; }).join("")}</div><div class="record-actions"><button class="secondary" data-cancel-interruption="${id}" type="button">Cancel</button></div>`;
+  el("interruptionEditors").append(editor);
+  editor.querySelector("[data-interruption-out]").value = out; editor.querySelector("[data-interruption-in]").value = incoming;
+  editor.querySelectorAll("[data-interruption-time]").forEach(input => {
+    input.addEventListener("input", () => formatClockInput(input));
+    input.addEventListener("change", () => formatClockInput(input, true));
+  });
+  editor.querySelectorAll("[data-interruption-now]").forEach(button => button.addEventListener("click", () => {
+    const now = new Date(), input = el(button.dataset.interruptionNow); input.value = `${String(now.getHours()).padStart(2,"0")}:${String(now.getMinutes()).padStart(2,"0")}`; setClockError(input, false);
+  }));
+  editor.querySelector("[data-cancel-interruption]").addEventListener("click", () => closeInterruptionEditor(String(id)));
+  renderInterruptionEditorState(); editor.querySelector("[data-interruption-out]").focus();
+}
+function closeInterruptionEditor(id = "") {
+  if (id) document.querySelector(`.interruption-editor[data-editor-id="${id}"]`)?.remove();
+  else el("interruptionEditors").replaceChildren();
+  renderInterruptionEditorState();
+}
+function interruptionEntryCount() {
+  const editingSlots = new Set([...document.querySelectorAll(".interruption-editor[data-slot]")].map(editor => editor.dataset.slot).filter(Boolean));
+  const storedCount = ["morning", "afternoon"].filter(slot => (draft[`${slot}Out`] || draft[`${slot}In`]) && !editingSlots.has(slot)).length;
+  return storedCount + document.querySelectorAll(".interruption-editor").length;
+}
+function renderInterruptionEditorState() {
+  const editors = [...document.querySelectorAll(".interruption-editor")];
+  editors.forEach((editor, index) => { editor.querySelector("h3").textContent = editors.length > 1 ? `Additional Time Entry ${index + 1}` : "Additional Time Entry"; });
+  el("toggleInterruptions").hidden = interruptionEntryCount() >= 2;
 }
 function classifyInterruption(out, incoming, record) {
   const lunchOut = normalizeClockTime(record.lunchOut), lunchIn = normalizeClockTime(record.lunchIn);
@@ -260,26 +307,29 @@ function classifyInterruption(out, incoming, record) {
   if (out >= "12:00") return "afternoon";
   return "";
 }
-function stageInterruptionFromEditor() {
-  if (el("interruptionEditor").hidden) return true;
+function stageInterruptionEditors() {
+  const editors = [...document.querySelectorAll(".interruption-editor")];
+  if (!editors.length) return true;
   if (!validateClockInputs("[data-interruption-time]")) return false;
-  const out = normalizeClockTime(el("interruptionOut").value), incoming = normalizeClockTime(el("interruptionIn").value);
-  if (!clockTimeIsValid(out) || !clockTimeIsValid(incoming) || out >= incoming) { alert("Enter a complete Additional Time Entry with an Out time before its In time."); return false; }
-  const slot = classifyInterruption(out, incoming, readForm());
-  if (!slot) { alert("An Additional Time Entry overlaps the lunch period. Please adjust its times before saving."); return false; }
-  const otherSlot = slot === "morning" ? "afternoon" : "morning";
-  const existingSlot = editingInterruption;
-  if (slot !== existingSlot && (draft[`${slot}Out`] || draft[`${slot}In`])) { alert(`This Additional Time Entry overlaps an existing ${slot === "morning" ? "Morning" : "Afternoon"} Additional Time Entry.`); return false; }
-  const otherOut = draft[`${otherSlot}Out`], otherIn = draft[`${otherSlot}In`];
-  if (otherOut && otherIn && out < otherIn && incoming > otherOut) { alert("This Additional Time Entry overlaps an existing Additional Time Entry."); return false; }
-  if (existingSlot && existingSlot !== slot) { draft[`${existingSlot}Out`] = ""; draft[`${existingSlot}In`] = ""; }
-  draft[`${slot}Out`] = out; draft[`${slot}In`] = incoming;
+  const record = readForm(), staged = clone(record);
+  editors.forEach(editor => { const slot = editor.dataset.slot; if (slot) { staged[`${slot}Out`] = ""; staged[`${slot}In`] = ""; } });
+  for (let index = 0; index < editors.length; index += 1) {
+    const editor = editors[index], out = normalizeClockTime(editor.querySelector("[data-interruption-out]").value), incoming = normalizeClockTime(editor.querySelector("[data-interruption-in]").value);
+    const label = editors.length > 1 ? `Additional Time Entry ${index + 1}` : "Additional Time Entry";
+    if (!clockTimeIsValid(out) || !clockTimeIsValid(incoming) || out >= incoming) { alert(`${label} must have complete Out and In times, with Out before In.`); return false; }
+    const slot = classifyInterruption(out, incoming, record);
+    if (!slot) { alert(`${label} overlaps the lunch period. Please adjust its times before saving.`); return false; }
+    if (staged[`${slot}Out`] || staged[`${slot}In`]) { alert(`${label} conflicts with the existing ${slot === "morning" ? "Morning" : "Afternoon"} Additional Time Entry.`); return false; }
+    staged[`${slot}Out`] = out; staged[`${slot}In`] = incoming;
+  }
+  draft = staged;
   closeInterruptionEditor(); renderInterruptionList(); renderCurrentPreview(); updateActionState();
   return true;
 }
 function removeInterruption(slot) {
   draft[`${slot}Out`] = ""; draft[`${slot}In`] = "";
-  closeInterruptionEditor(); renderInterruptionList(); renderCurrentPreview(); updateActionState();
+  const editor = document.querySelector(`.interruption-editor[data-slot="${slot}"]`); if (editor) closeInterruptionEditor(editor.dataset.editorId);
+  renderInterruptionList(); renderCurrentPreview(); updateActionState();
 }
 function renderInterruptionList() {
   const items = [
@@ -288,7 +338,7 @@ function renderInterruptionList() {
   ].filter(item => item.out || item.incoming);
   const list = el("interruptionList"); list.hidden = items.length === 0;
   list.innerHTML = items.map(item => `<div class="interruption-item"><strong>${item.label}</strong><span>${item.out || "—"}–${item.incoming || "—"}</span><div><button class="link-button" data-edit-interruption="${item.slot}">Edit</button><button class="link-button danger" data-remove-interruption="${item.slot}">Remove</button></div></div>`).join("");
-  el("toggleInterruptions").hidden = Boolean((draft.morningOut || draft.morningIn) && (draft.afternoonOut || draft.afternoonIn));
+  renderInterruptionEditorState();
   list.querySelectorAll("[data-edit-interruption]").forEach(button => button.addEventListener("click", () => openInterruptionEditor(button.dataset.editInterruption)));
   list.querySelectorAll("[data-remove-interruption]").forEach(button => button.addEventListener("click", () => removeInterruption(button.dataset.removeInterruption)));
 }
@@ -321,7 +371,7 @@ function rebuildFortnightSelector() {
     yearSelect.disabled = monthSelect.disabled = selector.disabled = true; return;
   }
   yearSelect.disabled = monthSelect.disabled = selector.disabled = false;
-  const knownDates = [todayISO(), state.settings.fortnightStart, ...Object.keys(state.records), ...Object.keys(state.submissions)];
+  const knownDates = [todayISO(), state.settings.fortnightStart, ...Object.keys(state.records), ...Object.keys(state.drafts), ...Object.keys(state.submissions)];
   const years = knownDates.map(date => Number(date.slice(0, 4)));
   const minYear = Math.min(...years), maxYear = Math.max(...years);
   yearSelect.innerHTML = Array.from({length:maxYear-minYear+1}, (_, i) => minYear+i).map(year => `<option value="${year}"${year === filterYear ? " selected" : ""}>${year}</option>`).join("");
@@ -358,9 +408,10 @@ function changeRecord(date) {
 function loadRecord(date, force = false, mode = "new") {
   if (!force && draftIsDirty() && !confirm("Discard your unsaved changes and open another record?")) return;
   activeDate = date; el("recordDate").value = date;
-  editMode = mode === "edit";
-  draft = editMode ? clone(state.records[date]) : emptyRecord(state.settings.attendanceType); originalDraft = clone(draft);
-  fillForm(draft); closeInterruptionEditor(); renderInterruptionList(); setLeaveToilExpanded(editMode && recordHasLeaveToil(draft)); renderAll();
+  const savedDraft = mode === "new" ? state.drafts[date] : null;
+  editMode = mode === "edit" || Boolean(savedDraft?.editMode && state.records[date]);
+  draft = savedDraft ? clone(savedDraft.record) : editMode ? clone(state.records[date]) : emptyRecord(state.settings.attendanceType); originalDraft = clone(draft);
+  fillForm(draft); closeInterruptionEditor(); renderInterruptionList(); setLeaveToilExpanded(savedDraft ? savedDraft.leaveToilExpanded : editMode && recordHasLeaveToil(draft)); renderAll();
   return true;
 }
 function submitRecord() {
@@ -368,7 +419,7 @@ function submitRecord() {
   if (!validateClockInputs("[data-record-time]")) return;
   if (!validateDurationInputs("[data-record-duration]")) return;
   draft = readForm();
-  if (!stageInterruptionFromEditor()) return;
+  if (!stageInterruptionEditors()) return;
   const existed = Object.prototype.hasOwnProperty.call(state.records, activeDate);
   if (!editMode && existed) { alert("A record already exists for this date. Use Edit in Timesheet History to change it."); return; }
   if (editMode && !existed) { alert("This record no longer exists. Cancel the edit and submit it as a new record."); return; }
@@ -398,9 +449,17 @@ function advanceToNextAvailableRecordDate(date) {
 }
 function commitRecordSubmission(submission) {
   const { date, candidateRecord, previous, existed, wasEditMode } = submission;
+  const previousDraft = state.drafts[date] ? clone(state.drafts[date]) : null;
+  const previousActiveDraftDate = state.activeDraftDate;
   state.records[date] = clone(candidateRecord);
+  removeSavedDraft(date);
   const submittedChanged = !recordsEqual(previous, candidateRecord) && flagSubmittedChange(date);
-  if (!save()) { if (previous) state.records[date] = previous; else delete state.records[date]; return; }
+  if (!save()) {
+    if (previous) state.records[date] = previous; else delete state.records[date];
+    if (previousDraft) state.drafts[date] = previousDraft;
+    state.activeDraftDate = previousActiveDraftDate;
+    return;
+  }
   if (!wasEditMode && !existed) advanceToNextAvailableRecordDate(date);
   else {
     editMode = false; draft = emptyRecord(state.settings.attendanceType); originalDraft = clone(draft); fillForm(draft); closeInterruptionEditor(); renderInterruptionList(); setLeaveToilExpanded(false); renderAll();
@@ -696,13 +755,12 @@ function closeResetHistoryModal() {
 function resetTimesheetHistory() {
   if (el("resetHistoryConfirmation").value !== "RESET") return;
   const previousState = state;
-  state = { records:{}, submissions:{}, settings:clone(state.settings) };
+  state = { records:{}, submissions:{}, drafts:clone(state.drafts), activeDraftDate:state.activeDraftDate, settings:clone(state.settings) };
   if (!save()) { state = previousState; return; }
   pendingRecordSubmission = null;
   reminderStart = "";
   editMode = false;
-  editingInterruption = "";
-  originalInterruptionEditor = "";
+  interruptionEditorSequence = 0;
   draft = emptyRecord(state.settings.attendanceType);
   originalDraft = clone(draft);
   if (validAnchor()) viewStart = periodFor(activeDate).start;
@@ -803,7 +861,7 @@ function prepareFeedback(options = {}) {
 }
 
 buildUI(); renderSettings();
-if (validAnchor()) viewStart = periodFor(todayISO()).start;
+if (validAnchor()) viewStart = periodFor(activeDate).start;
 loadRecord(activeDate, true);
 openWelcomeModal();
 if (!validAnchor() && !TEST_MODE) setTimeout(anchorReminder, 0);

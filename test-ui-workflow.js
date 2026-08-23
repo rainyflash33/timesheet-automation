@@ -9,6 +9,8 @@
   function assert(condition, message) { if (!condition) throw new Error(message); }
   function input(id, value) { el(id).value = value; el(id).dispatchEvent(new Event("input", { bubbles:true })); }
   function change(id, value) { input(id, value); el(id).dispatchEvent(new Event("change", { bubbles:true })); }
+  function interruptionEditor(index = 0) { return document.querySelectorAll(".interruption-editor")[index]; }
+  function interruptionInput(index, kind, value) { const field = interruptionEditor(index).querySelector(`[data-interruption-${kind}]`); field.value = value; field.dispatchEvent(new Event("input", { bubbles:true })); return field; }
   function metric(id, label) { return [...el(id).children].find(card => card.querySelector("span")?.textContent === label)?.querySelector("strong")?.textContent; }
   function restore() {
     if (originalStoredValue == null) localStorage.removeItem(STORAGE_KEY); else localStorage.setItem(STORAGE_KEY, originalStoredValue);
@@ -100,6 +102,33 @@
     assert(!el("submitRecord").disabled, "Submit remained disabled after saving Thursday");
     assert(el("settingsContent").hidden, "Settings did not collapse after a successful save");
     assert(el("settingsToggle").getAttribute("aria-expanded") === "false", "Settings toggle state is incorrect after save");
+    assert([...el("submitRecord").parentElement.children].slice(0, 3).map(button => button.textContent).join("|") === "Submit|Save|Clear", "Daily Entry actions are not ordered Submit, Save, Clear");
+
+    // Drafts persist separately from submitted records and never enter History or saved calculations.
+    const draftDate = "2026-08-24", existingDate = "2026-08-20";
+    const existingRecord = {...emptyRecord(), startTime:"09:00", lunchOut:"12:30", lunchIn:"13:10", finishTime:"17:21"};
+    state.records[existingDate] = clone(existingRecord); save(); loadRecord(draftDate, true);
+    const calculationsBeforeDraft = JSON.stringify(C.recalculate(state.records, state.settings));
+    input("startTime", "0900"); input("lunchOut", "1230"); input("lunchIn", "1310"); input("finishTime", "1721");
+    el("toggleInterruptions").click(); interruptionInput(0, "out", "1500"); interruptionInput(0, "in", "1520");
+    el("toggleLeaveToil").click(); change("leaveType", "Annual"); change("leaveHours", "100"); el("saveDraft").click();
+    stored = JSON.parse(localStorage.getItem(STORAGE_KEY));
+    assert(el("status").textContent === "Draft saved" && stored.drafts[draftDate]?.record.afternoonOut === "15:00" && stored.drafts[draftDate]?.record.leaveHours === "1:00", "Save did not persist all current Additional Time and Leave draft data");
+    assert(!stored.records[draftDate] && !el("recordsBody").textContent.includes(formatDisplayDate(draftDate)), "saving a draft created a Timesheet History record");
+    assert(JSON.stringify(C.recalculate(state.records, state.settings)) === calculationsBeforeDraft && recordsEqual(state.records[existingDate], existingRecord), "saving a draft changed balances or an existing submitted record");
+    input("finishTime", "1731"); el("saveDraft").click(); stored = JSON.parse(localStorage.getItem(STORAGE_KEY));
+    assert(stored.drafts[draftDate].record.finishTime === "17:31", "saving an edited draft did not replace its previous values");
+    state = load(); activeDate = todayISO(); loadRecord(state.activeDraftDate, true);
+    assert(activeDate === draftDate && el("finishTime").value === "17:31" && draft.afternoonOut === "15:00" && el("leaveType").value === "Annual" && el("leaveHours").value === "1:00" && !el("leaveToilPanel").hidden, "saved draft did not restore correctly after reopening");
+    el("submitRecord").click(); stored = JSON.parse(localStorage.getItem(STORAGE_KEY));
+    assert(stored.records[draftDate]?.finishTime === "17:31" && !stored.drafts[draftDate] && C.recalculate(state.records, state.settings)[draftDate]?.daily != null, "submitting a saved draft did not create the normal record, calculate it, and remove the draft");
+    assert(recordsEqual(stored.records[existingDate], existingRecord), "submitting a draft changed an existing submitted record");
+    delete state.records[draftDate]; save(); loadRecord("2026-08-25", true); input("startTime", "0900"); el("saveDraft").click();
+    assert(JSON.parse(localStorage.getItem(STORAGE_KEY)).drafts["2026-08-25"]?.record.startTime === "09:00", "partial Daily Entry draft was not saved");
+    el("clearRecord").click(); stored = JSON.parse(localStorage.getItem(STORAGE_KEY));
+    assert(!stored.drafts["2026-08-25"] && !el("startTime").value && recordsEqual(stored.records[existingDate], existingRecord), "Clear did not remove only the current saved draft");
+    delete state.records[existingDate]; save(); loadRecord("2026-08-21", true);
+
     el("settingsToggle").click();
     assert(!el("settingsContent").hidden, "Settings did not expand when its header was clicked");
 
@@ -113,11 +142,11 @@
     assert(!el("status").textContent.includes("Incomplete record"), "Lunch Out displayed a live incomplete-record warning");
     el("submitRecord").click();
     assert(alerts.at(-1).includes("Complete both ends") && activeDate === liveEntryDate && !state.records[liveEntryDate], "incomplete Lunch pair was not blocked at Submit");
-    el("clearRecord").click(); input("lunchOut", "1230"); input("lunchIn", "1300"); el("toggleInterruptions").click(); input("interruptionOut", "1100");
+    el("clearRecord").click(); input("lunchOut", "1230"); input("lunchIn", "1300"); el("toggleInterruptions").click(); interruptionInput(0, "out", "1100");
     assert(!el("status").textContent.includes("Incomplete record"), "partial Additional Time Entry displayed a live incomplete-record warning");
     el("submitRecord").click();
-    assert(alerts.at(-1).includes("complete Additional Time Entry") && !el("interruptionEditor").hidden && activeDate === liveEntryDate && !state.records[liveEntryDate], "partial Additional Time Entry was not blocked at Submit with its editor open");
-    el("cancelInterruption").click(); el("clearRecord").click();
+    assert(alerts.at(-1).includes("complete Out and In times") && interruptionEditor() && activeDate === liveEntryDate && !state.records[liveEntryDate], "partial Additional Time Entry was not blocked at Submit with its editor open");
+    interruptionEditor().querySelector("[data-cancel-interruption]").click(); el("clearRecord").click();
 
     input("startTime", "0900"); input("lunchOut", "1200"); input("lunchIn", "1300"); input("finishTime", "1721");
     assert(el("leaveToilPanel").hidden, "normal working day unexpectedly expanded Leave / TOIL");
@@ -131,8 +160,7 @@
     const assertRecordFormCleared = message => {
       assert(recordsEqual(readForm(), emptyRecord(state.settings.attendanceType)), `${message}: record fields were not reset`);
       assert(el("attendanceTypeSetting").value === state.settings.attendanceType, `${message}: persistent Attendance Type changed`);
-      assert(el("interruptionEditor").hidden && el("interruptionList").hidden, `${message}: Additional Time Entry UI remained visible`);
-      assert(!el("interruptionOut").value && !el("interruptionIn").value, `${message}: Additional Time Entry editor values remained`);
+      assert(!interruptionEditor() && el("interruptionList").hidden, `${message}: Additional Time Entry UI remained visible`);
       assert(el("leaveToilPanel").hidden, `${message}: Leave / TOIL panel did not collapse`);
       assert(metric("dailyResults", "Daily Hours") === "0:00", `${message}: empty daily preview was not recalculated`);
     };
@@ -273,11 +301,11 @@
     input("finishTime", "1721");
     assert(el("finishTime").value === "17:21" && el("finishTimeError").hidden, "corrected time did not format or clear its error");
     el("toggleInterruptions").click();
-    input("interruptionOut", "1015"); input("interruptionIn", "1040");
-    assert(el("interruptionOut").value === "10:15" && el("interruptionIn").value === "10:40", "Additional Time Entry digits were not formatted");
-    input("interruptionIn", "1265");
-    assert(!el("interruptionInError").hidden, "invalid Additional Time Entry did not show an inline error");
-    el("cancelInterruption").click();
+    interruptionInput(0, "out", "1015"); interruptionInput(0, "in", "1040");
+    assert(interruptionEditor().querySelector("[data-interruption-out]").value === "10:15" && interruptionEditor().querySelector("[data-interruption-in]").value === "10:40", "Additional Time Entry digits were not formatted");
+    const invalidInterruptionIn = interruptionInput(0, "in", "1265");
+    assert(!el(`${invalidInterruptionIn.id}Error`).hidden, "invalid Additional Time Entry did not show an inline error");
+    interruptionEditor().querySelector("[data-cancel-interruption]").click();
     assert(el("submitRecord").textContent === "Submit", "new record is not in Submit mode");
     const workflowRecordDate = activeDate;
     el("submitRecord").click();
@@ -333,29 +361,51 @@
 
     setSettingsExpanded(true); change("attendanceTypeSetting", "Flextime"); el("saveSettings").click();
 
+    // Up to two Additional Time Entry editors can be open, cancelled independently, and classified in either order.
+    loadRecord("2026-08-24", true); input("startTime", "0900"); input("lunchOut", "1230"); input("lunchIn", "1310"); input("finishTime", "1721");
+    el("toggleInterruptions").click();
+    assert(document.querySelectorAll(".interruption-editor").length === 1 && !el("toggleInterruptions").hidden, "one Additional Time Entry editor did not leave capacity for a second");
+    el("toggleInterruptions").click();
+    assert(document.querySelectorAll(".interruption-editor").length === 2 && el("toggleInterruptions").hidden && interruptionEditor(0).querySelector("h3").textContent.endsWith("1") && interruptionEditor(1).querySelector("h3").textContent.endsWith("2"), "two numbered Additional Time Entry editors were not shown or the third-entry control remained available");
+    el("toggleInterruptions").click(); assert(document.querySelectorAll(".interruption-editor").length === 2, "a third Additional Time Entry editor was created");
+    interruptionInput(0, "out", "1500"); interruptionInput(0, "in", "1520"); interruptionInput(1, "out", "1030"); interruptionInput(1, "in", "1045"); el("saveDraft").click();
+    assert(state.drafts["2026-08-24"]?.record.afternoonOut === "15:00" && state.drafts["2026-08-24"]?.record.morningOut === "10:30", "Afternoon-first and Morning-second editors were not classified correctly on draft Save");
+    el("clearRecord").click(); loadRecord("2026-08-25", true); input("startTime", "0900"); input("lunchOut", "1230"); input("lunchIn", "1310"); input("finishTime", "1721");
+    el("toggleInterruptions").click(); el("toggleInterruptions").click(); interruptionInput(0, "out", "1030"); interruptionInput(0, "in", "1045"); interruptionInput(1, "out", "1500"); interruptionInput(1, "in", "1520"); el("submitRecord").click();
+    assert(state.records["2026-08-25"]?.morningOut === "10:30" && state.records["2026-08-25"]?.afternoonOut === "15:00", "Morning-first and Afternoon-second editors were not classified and submitted correctly");
+    delete state.records["2026-08-25"]; save(); loadRecord("2026-08-26", true); input("lunchOut", "1230"); input("lunchIn", "1310");
+    el("toggleInterruptions").click(); el("toggleInterruptions").click(); interruptionInput(0, "out", "1030"); interruptionInput(0, "in", "1045"); interruptionInput(1, "out", "1500"); interruptionInput(1, "in", "1520");
+    interruptionEditor(0).querySelector("[data-cancel-interruption]").click();
+    assert(document.querySelectorAll(".interruption-editor").length === 1 && interruptionEditor(0).querySelector("[data-interruption-out]").value === "15:00" && !el("toggleInterruptions").hidden, "cancelling editor 1 changed or closed editor 2");
+    el("toggleInterruptions").click(); interruptionInput(1, "out", "1030"); interruptionInput(1, "in", "1045"); interruptionEditor(1).querySelector("[data-cancel-interruption]").click();
+    assert(document.querySelectorAll(".interruption-editor").length === 1 && interruptionEditor(0).querySelector("[data-interruption-out]").value === "15:00", "cancelling editor 2 changed or closed editor 1");
+    el("toggleInterruptions").click(); interruptionInput(1, "out", "1030"); const beforeIncompletePairSave = localStorage.getItem(STORAGE_KEY); el("saveDraft").click();
+    assert(alerts.at(-1).includes("Additional Time Entry 2") && alerts.at(-1).includes("complete Out and In times") && document.querySelectorAll(".interruption-editor").length === 2 && localStorage.getItem(STORAGE_KEY) === beforeIncompletePairSave, "one valid and one incomplete editor did not block Save and identify entry 2");
+    closeInterruptionEditor(); el("clearRecord").click();
+
     // Additional Time Entries are classified by lunch relationship and staged by the main Save action.
     loadRecord("2026-08-24", true); input("startTime", "0900"); input("lunchOut", "1230"); input("lunchIn", "1310"); input("finishTime", "1721");
     assert(!el("saveInterruption"), "the separate Additional Time Entry Save button still exists");
-    el("toggleInterruptions").click(); input("interruptionOut", "1500"); input("interruptionIn", "1520"); el("submitRecord").click();
+    el("toggleInterruptions").click(); interruptionInput(0, "out", "1500"); interruptionInput(0, "in", "1520"); el("submitRecord").click();
     assert(state.records["2026-08-24"]?.afternoonOut === "15:00" && !state.records["2026-08-24"]?.morningOut, "first and only afternoon entry was not saved as Afternoon");
-    loadRecord("2026-08-24", true, "edit"); el("interruptionList").querySelector("[data-edit-interruption='afternoon']").click(); input("interruptionIn", "1530"); el("cancelInterruption").click();
+    loadRecord("2026-08-24", true, "edit"); el("interruptionList").querySelector("[data-edit-interruption='afternoon']").click(); interruptionInput(0, "in", "1530"); interruptionEditor().querySelector("[data-cancel-interruption]").click();
     assert(draft.afternoonIn === "15:20", "cancelling an Additional Time Entry edit changed its original value");
-    el("interruptionList").querySelector("[data-edit-interruption='afternoon']").click(); input("interruptionIn", "1530"); el("submitRecord").click();
+    el("interruptionList").querySelector("[data-edit-interruption='afternoon']").click(); interruptionInput(0, "in", "1530"); el("submitRecord").click();
     assert(state.records["2026-08-24"].afternoonIn === "15:30", "main Save Changes did not update an Additional Time Entry");
-    loadRecord("2026-08-24", true, "edit"); el("toggleInterruptions").click(); input("interruptionOut", "1030"); input("interruptionIn", "1045"); el("submitRecord").click();
+    loadRecord("2026-08-24", true, "edit"); el("toggleInterruptions").click(); interruptionInput(0, "out", "1030"); interruptionInput(0, "in", "1045"); el("submitRecord").click();
     assert(state.records["2026-08-24"].morningOut === "10:30" && state.records["2026-08-24"].afternoonOut === "15:00", "Afternoon-first then Morning did not preserve both entries");
     loadRecord("2026-08-24", true, "edit"); el("interruptionList").querySelector("[data-remove-interruption='morning']").click(); el("submitRecord").click();
     assert(!state.records["2026-08-24"].morningOut && state.records["2026-08-24"].afternoonOut === "15:00", "Remove did not delete only the selected entry");
 
-    loadRecord("2026-08-25", true); input("startTime", "0900"); input("lunchOut", "1230"); input("lunchIn", "1310"); input("finishTime", "1721"); el("toggleInterruptions").click(); input("interruptionOut", "1030"); input("interruptionIn", "1045"); el("submitRecord").click();
+    loadRecord("2026-08-25", true); input("startTime", "0900"); input("lunchOut", "1230"); input("lunchIn", "1310"); input("finishTime", "1721"); el("toggleInterruptions").click(); interruptionInput(0, "out", "1030"); interruptionInput(0, "in", "1045"); el("submitRecord").click();
     assert(state.records["2026-08-25"]?.morningOut === "10:30" && !state.records["2026-08-25"]?.afternoonOut, "first and only morning entry was not saved as Morning");
-    loadRecord("2026-08-25", true, "edit"); el("toggleInterruptions").click(); input("interruptionOut", "1500"); input("interruptionIn", "1520"); el("submitRecord").click();
+    loadRecord("2026-08-25", true, "edit"); el("toggleInterruptions").click(); interruptionInput(0, "out", "1500"); interruptionInput(0, "in", "1520"); el("submitRecord").click();
     assert(state.records["2026-08-25"].morningOut === "10:30" && state.records["2026-08-25"].afternoonOut === "15:00", "Morning-first then Afternoon did not preserve both entries");
-    loadRecord("2026-08-26", true); input("startTime", "0900"); input("lunchOut", "1230"); input("lunchIn", "1310"); input("finishTime", "1721"); el("toggleInterruptions").click(); input("interruptionOut", "1500"); input("interruptionIn", "1520"); el("cancelInterruption").click();
-    assert(el("interruptionEditor").hidden && !draft.morningOut && !draft.afternoonOut, "cancelling a new Additional Time Entry did not discard it");
-    el("toggleInterruptions").click(); input("interruptionOut", "1220"); input("interruptionIn", "1240"); const beforeLunchOverlap = localStorage.getItem(STORAGE_KEY); el("submitRecord").click();
-    assert(alerts.at(-1).includes("overlaps the lunch period") && !el("interruptionEditor").hidden && localStorage.getItem(STORAGE_KEY) === beforeLunchOverlap, "lunch-overlapping Additional Time Entry was not clearly rejected");
-    el("cancelInterruption").click(); el("clearRecord").click();
+    loadRecord("2026-08-26", true); input("startTime", "0900"); input("lunchOut", "1230"); input("lunchIn", "1310"); input("finishTime", "1721"); el("toggleInterruptions").click(); interruptionInput(0, "out", "1500"); interruptionInput(0, "in", "1520"); interruptionEditor().querySelector("[data-cancel-interruption]").click();
+    assert(!interruptionEditor() && !draft.morningOut && !draft.afternoonOut, "cancelling a new Additional Time Entry did not discard it");
+    el("toggleInterruptions").click(); interruptionInput(0, "out", "1220"); interruptionInput(0, "in", "1240"); const beforeLunchOverlap = localStorage.getItem(STORAGE_KEY); el("submitRecord").click();
+    assert(alerts.at(-1).includes("overlaps the lunch period") && interruptionEditor() && localStorage.getItem(STORAGE_KEY) === beforeLunchOverlap, "lunch-overlapping Additional Time Entry was not clearly rejected");
+    interruptionEditor().querySelector("[data-cancel-interruption]").click(); el("clearRecord").click();
     ["2026-08-24", "2026-08-25"].forEach(date => { delete state.records[date]; }); save(); loadRecord("2026-08-26", true);
 
     // Leave / TOIL uses the same main-save and local-cancel interaction pattern.

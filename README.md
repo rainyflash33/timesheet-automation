@@ -6,7 +6,7 @@ A small browser-only timesheet. Records are stored in the current browser using 
 
 Open the published GitHub Pages URL in a browser. For local use, open the project folder and double-click `index.html`.
 
-On first use, save a Thursday as the required **Fortnight Start Date** in Settings. Click **Now** to stamp the current local time, or type a time in 24-hour `HH:MM` format, such as `13:50`. Press **Submit** to save a new daily record. Use **Edit** or **Delete** beside a saved record; editing and deleting automatically recalculates later balances. The app warns before discarding an unsaved daily draft.
+On first use, save a Thursday as the required **Fortnight Start Date** in Settings. Click **Now** to stamp the current local time, or type a time in 24-hour `HH:MM` format, such as `13:50`. Use **Save** to keep the current Daily Entry as a local draft without adding it to History or balances, then press **Submit** when it is ready to become a timesheet record. Saved drafts restore on the same device and are removed after Submit or Clear. Use **Edit** or **Delete** beside a submitted record; editing and deleting automatically recalculates later balances. The app warns before discarding unsaved changes.
 
 **Export Fortnight CSV** exports the period selected under **View fortnight**. It always contains 14 chronological rows from Thursday through the second Wednesday, including completely blank rows for dates without records.
 
