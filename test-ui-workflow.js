@@ -102,9 +102,11 @@
 
     input("startTime", "0900"); input("lunchOut", "1200"); input("lunchIn", "1300"); input("finishTime", "1721");
     assert(el("leaveToilPanel").hidden, "normal working day unexpectedly expanded Leave / TOIL");
+    const normalRecordDate = activeDate;
     el("submitRecord").click();
-    assert(state.records[activeDate]?.finishTime === "17:21" && state.records[activeDate]?.attendanceType === "Flextime", "normal working day did not submit with the Attendance Type default");
-    el("recordsBody").querySelector(`[data-delete="${activeDate}"]`).click();
+    assert(state.records[normalRecordDate]?.finishTime === "17:21" && state.records[normalRecordDate]?.attendanceType === "Flextime", "normal working day did not submit with the Attendance Type default");
+    assert(activeDate === C.addDays(normalRecordDate, 1) && el("recordDate").value === activeDate, "new record submission did not advance one day");
+    el("recordsBody").querySelector(`[data-delete="${normalRecordDate}"]`).click();
     assert(el("leaveToilPanel").hidden, "normal working day cleanup expanded Leave / TOIL");
 
     const assertRecordFormCleared = message => {
@@ -161,6 +163,12 @@
     assert(!hasMeaningfulTimesheetData({...noWork, attendanceType:"Senior Officer"}), "persistent Attendance Type alone was treated as daily timesheet data");
     assert(hasMeaningfulTimesheetData({...noWork, afternoonOut:"15:00", afternoonIn:"15:30"}), "Additional Time Entry was not treated as meaningful");
     assert(workConfirmationFor("2026-08-21", {...noWork, leaveType:"Public Holiday", leaveHours:"7:21"})?.title === "Please confirm this public holiday entry", "Public Holiday additional data did not trigger confirmation");
+    const recordsBeforeNextDateTests = state.records;
+    state.records = {"2026-07-24":clone(noWork)};
+    assert(nextAvailableRecordDate("2026-07-23") === "2026-07-25", "next available date did not skip one saved record");
+    state.records["2026-07-25"] = clone(noWork);
+    assert(nextAvailableRecordDate("2026-07-23") === "2026-07-26", "next available date did not skip two saved records");
+    state.records = recordsBeforeNextDateTests;
 
     // End-to-end Saturday diagnostic and hard-gate test through the real controls and Submit button.
     change("recordDate", "2026-08-22"); el("toggleLeaveToil").click(); change("leaveType", "Annual"); change("leaveHours", "721"); el("toggleLeaveToil").click();
@@ -177,9 +185,11 @@
     assert(modalRect.left >= 0 && modalRect.right <= innerWidth && modalRect.height <= innerHeight, "work confirmation is not contained by the viewport");
     el("cancelSpecialWork").click();
     assert(el("workConfirmationModal").hidden && el("leaveType").value === "Annual" && el("leaveHours").value === "7:21", "Go Back lost the collapsed Leave / TOIL draft");
+    assert(activeDate === "2026-08-22", "Go Back advanced the Record Date");
     assert(state.records["2026-08-22"] === undefined && JSON.parse(localStorage.getItem(STORAGE_KEY)).records["2026-08-22"] === undefined, "Go Back saved the Saturday record");
     el("submitRecord").click(); el("confirmSpecialWork").click();
     assert(Boolean(state.records["2026-08-22"]) && Boolean(JSON.parse(localStorage.getItem(STORAGE_KEY)).records["2026-08-22"]), "Confirm did not save the captured Saturday record");
+    assert(activeDate === "2026-08-23", "confirmed weekend submission did not advance the Record Date");
     delete state.records["2026-08-22"]; save();
 
     // The same hard gate must hold for Sunday.
@@ -187,8 +197,10 @@
     assert(!el("workConfirmationModal").hidden && state.records["2026-08-23"] === undefined && JSON.parse(localStorage.getItem(STORAGE_KEY)).records["2026-08-23"] === undefined, "Sunday record bypassed confirmation");
     el("cancelSpecialWork").click();
     assert(el("leaveType").value === "Annual" && el("leaveHours").value === "7:21" && state.records["2026-08-23"] === undefined, "Sunday Go Back lost the draft or saved it");
+    assert(activeDate === "2026-08-23", "Sunday Go Back advanced the Record Date");
     el("submitRecord").click(); el("confirmSpecialWork").click();
     assert(Boolean(state.records["2026-08-23"]) && Boolean(JSON.parse(localStorage.getItem(STORAGE_KEY)).records["2026-08-23"]), "Sunday Confirm did not save the record");
+    assert(activeDate === "2026-08-24", "confirmed Sunday submission did not advance the Record Date");
     delete state.records["2026-08-23"]; save();
     loadRecord("2026-08-21", true);
     assert(el("leaveToilPanel").hidden, "normal new record did not restore the collapsed Leave / TOIL state");
@@ -236,8 +248,10 @@
     input("finishTime", "2460");
     assert(!el("finishTimeError").hidden, "invalid four-digit time did not show an inline error");
     const beforeInvalidTimeSave = localStorage.getItem(STORAGE_KEY);
+    const dateBeforeInvalidTimeSave = activeDate;
     submitRecord();
     assert(localStorage.getItem(STORAGE_KEY) === beforeInvalidTimeSave, "invalid manual time was saved");
+    assert(activeDate === dateBeforeInvalidTimeSave, "validation failure advanced the Record Date");
     input("finishTime", "1721");
     assert(el("finishTime").value === "17:21" && el("finishTimeError").hidden, "corrected time did not format or clear its error");
     el("toggleInterruptions").click();
@@ -247,24 +261,25 @@
     assert(!el("interruptionInError").hidden, "invalid Additional Time Entry did not show an inline error");
     el("cancelInterruption").click();
     assert(el("submitRecord").textContent === "Submit", "new record is not in Submit mode");
+    const workflowRecordDate = activeDate;
     el("submitRecord").click();
     stored = JSON.parse(localStorage.getItem(STORAGE_KEY));
-    assert(stored.records[activeDate].finishTime === "17:21", "new record was not persisted");
-    assert(stored.records[activeDate].attendanceType === "Flextime", "new record did not use the saved Attendance Type setting");
-    assert(el("recordsBody").textContent.includes(formatDisplayDate(activeDate)), "new record missing from history");
+    assert(stored.records[workflowRecordDate].finishTime === "17:21", "new record was not persisted");
+    assert(stored.records[workflowRecordDate].attendanceType === "Flextime", "new record did not use the saved Attendance Type setting");
+    assert(el("recordsBody").textContent.includes(formatDisplayDate(workflowRecordDate)), "new record missing from history");
     assert(el("submitRecord").textContent === "Submit", "submit did not return to new-record mode");
 
     setSettingsExpanded(true); change("attendanceTypeSetting", "Senior Officer A/B"); el("saveSettings").click();
     stored = JSON.parse(localStorage.getItem(STORAGE_KEY));
     assert(stored.settings.attendanceType === "Senior Officer A/B" && draft.attendanceType === "Senior Officer A/B", "Attendance Type setting was not saved or applied to new records");
-    assert(stored.records[activeDate].attendanceType === "Flextime", "changing Attendance Type rewrote a historical record");
+    assert(stored.records[workflowRecordDate].attendanceType === "Flextime", "changing Attendance Type rewrote a historical record");
     assert(metric("dailyResults", "Daily SOG Balance") !== undefined && metric("dailyResults", "Daily Flex Balance") === undefined, "Senior Officer mode did not replace Flex results with SOG results");
     assert([...el("leaveType").options].find(option => option.value === "Flex")?.disabled, "Flex Leave remained selectable for Senior Officer A/B");
     assert(metric("fortnightResults", "Opening SOG Balance") !== undefined && metric("fortnightResults", "Opening Flex Balance") === undefined, "Senior Officer fortnight summary retained Flex-specific labels");
     input("startTime", "0900"); el("clearRecord").click();
     assert(draft.attendanceType === "Senior Officer A/B" && el("attendanceTypeSetting").value === "Senior Officer A/B" && el("leaveToilPanel").hidden, "Clear reset the persistent Attendance Type setting");
 
-    el("recordsBody").querySelector(`[data-edit="${activeDate}"]`).click();
+    el("recordsBody").querySelector(`[data-edit="${workflowRecordDate}"]`).click();
     assert(draft.attendanceType === "Flextime", "editing a historical record did not preserve its Attendance Type");
     input("finishTime", "17:41");
     input("fortnightStart", "2026-08-21");
@@ -278,23 +293,23 @@
     assert(!el("submitRecord").disabled, "Submit did not recover after switching back to Thursday");
     el("cancelEdit").click();
 
-    el("recordsBody").querySelector(`[data-edit="${activeDate}"]`).click();
+    el("recordsBody").querySelector(`[data-edit="${workflowRecordDate}"]`).click();
     assert(el("submitRecord").textContent === "Save Changes", "Edit did not enter edit mode");
     assert(!el("cancelEdit").hidden, "Cancel Edit is hidden in edit mode");
     input("finishTime", "17:31"); el("cancelEdit").click();
     stored = JSON.parse(localStorage.getItem(STORAGE_KEY));
-    assert(stored.records[activeDate].finishTime === "17:21", "Cancel Edit changed stored data");
+    assert(stored.records[workflowRecordDate].finishTime === "17:21", "Cancel Edit changed stored data");
     assert(el("submitRecord").textContent === "Submit", "Cancel Edit did not leave edit mode");
 
-    el("recordsBody").querySelector(`[data-edit="${activeDate}"]`).click();
+    el("recordsBody").querySelector(`[data-edit="${workflowRecordDate}"]`).click();
     input("finishTime", "17:31"); el("submitRecord").click();
     stored = JSON.parse(localStorage.getItem(STORAGE_KEY));
-    assert(stored.records[activeDate].finishTime === "17:31", "edited record was not persisted");
+    assert(stored.records[workflowRecordDate].finishTime === "17:31" && activeDate === workflowRecordDate, "edited record was not persisted or changed the active date");
     assert(el("submitRecord").textContent === "Submit", "Save Changes did not leave edit mode");
 
-    el("recordsBody").querySelector(`[data-delete="${activeDate}"]`).click();
+    el("recordsBody").querySelector(`[data-delete="${workflowRecordDate}"]`).click();
     stored = JSON.parse(localStorage.getItem(STORAGE_KEY));
-    assert(!stored.records[activeDate], "deleted record remains in storage");
+    assert(!stored.records[workflowRecordDate], "deleted record remains in storage");
 
     setSettingsExpanded(true); change("attendanceTypeSetting", "Flextime"); el("saveSettings").click();
 
@@ -322,25 +337,25 @@
     assert(metric("dailyResults", "Progressive TOIL Balance") === "0:00", "Additional Time Entry preview TOIL is incorrect");
     assert(metric("fortnightResults", "Hours Recorded This Period") === "7:01", "Fortnight hours do not match the two-entry preview");
     assert(metric("fortnightResults", "Net Flex for the Period") === "-0:20", "Fortnight flex does not match the two-entry preview");
-    el("submitRecord").click();
+    const interruptionRecordDate = activeDate; el("submitRecord").click();
+    el("recordsBody").querySelector(`[data-edit="${interruptionRecordDate}"]`).click();
     assert(metric("dailyResults", "Daily Hours") === "7:01", "Daily Hours became stale after Submit");
     assert(metric("dailyResults", "Daily Flex Balance") === "-0:20", "Daily Flex became stale after Submit");
-    el("recordsBody").querySelector(`[data-edit="${activeDate}"]`).click();
     el("interruptionList").querySelector("[data-edit-interruption='afternoon']").click(); input("interruptionIn", "1510"); el("saveInterruption").click();
     assert(metric("dailyResults", "Daily Hours") === "7:11" && metric("dailyResults", "Daily Flex Balance") === "-0:10" && metric("fortnightResults", "Hours Recorded This Period") === "7:11" && metric("fortnightResults", "Net Flex for the Period") === "-0:10", "Editing Afternoon did not update both displays");
     el("interruptionList").querySelector("[data-remove-interruption='afternoon']").click();
     assert(metric("dailyResults", "Daily Hours") === "7:21" && metric("dailyResults", "Daily Flex Balance") === "0:00" && metric("fortnightResults", "Hours Recorded This Period") === "7:21" && metric("fortnightResults", "Net Flex for the Period") === "0:00", "Removing Afternoon did not update both displays");
     el("cancelEdit").click();
-    el("recordsBody").querySelector(`[data-delete="${activeDate}"]`).click();
+    el("recordsBody").querySelector(`[data-delete="${interruptionRecordDate}"]`).click();
 
     setSettingsExpanded(true); change("attendanceTypeSetting", "Senior Officer A/B"); el("saveSettings").click();
-    el("toggleLeaveToil").click(); change("toilHours", "100"); el("submitRecord").click();
+    el("toggleLeaveToil").click(); change("toilHours", "100"); const toilRecordDate = activeDate; el("submitRecord").click();
     stored = JSON.parse(localStorage.getItem(STORAGE_KEY));
-    assert(stored.records[activeDate].toilHours === "1:00" && stored.records[activeDate].attendanceType === "Senior Officer A/B", "TOIL Hours earned or the new-record Attendance Type was not saved");
+    assert(stored.records[toilRecordDate].toilHours === "1:00" && stored.records[toilRecordDate].attendanceType === "Senior Officer A/B", "TOIL Hours earned or the new-record Attendance Type was not saved");
+    el("recordsBody").querySelector(`[data-edit="${toilRecordDate}"]`).click();
     assert(metric("dailyResults", "Progressive TOIL Balance") === "1:00", "saved TOIL Hours earned did not update the balance");
-    el("recordsBody").querySelector(`[data-edit="${activeDate}"]`).click();
     assert(!el("leaveToilPanel").hidden && el("toilHours").value === "1:00", "editing a TOIL record did not reveal its saved value");
-    el("cancelEdit").click(); el("recordsBody").querySelector(`[data-delete="${activeDate}"]`).click();
+    el("cancelEdit").click(); el("recordsBody").querySelector(`[data-delete="${toilRecordDate}"]`).click();
 
     assert(formatDisplayDate("2026-08-20") === "20-08-2026 Thu", "Thursday history date formatting is incorrect");
     assert(formatDisplayDate("2026-08-21") === "21-08-2026 Fri", "Friday history date formatting is incorrect");

@@ -352,13 +352,28 @@ function submitRecord() {
   if (publicHolidayConfirmation) { queueRecordConfirmation(submission, publicHolidayConfirmation); return; }
   commitRecordSubmission(submission);
 }
+function nextAvailableRecordDate(date) {
+  let nextDate = C.addDays(date, 1);
+  while (Object.prototype.hasOwnProperty.call(state.records, nextDate)) nextDate = C.addDays(nextDate, 1);
+  return nextDate;
+}
+function advanceToNextAvailableRecordDate(date) {
+  const nextDate = nextAvailableRecordDate(date);
+  viewStart = periodFor(nextDate).start;
+  filterYear = Number(nextDate.slice(0, 4));
+  filterMonth = Number(nextDate.slice(5, 7));
+  loadRecord(nextDate, true);
+}
 function commitRecordSubmission(submission) {
-  const { date, candidateRecord, previous, existed } = submission;
+  const { date, candidateRecord, previous, existed, wasEditMode } = submission;
   state.records[date] = clone(candidateRecord);
   const submittedChanged = !recordsEqual(previous, candidateRecord) && flagSubmittedChange(date);
   if (!save()) { if (previous) state.records[date] = previous; else delete state.records[date]; return; }
-  editMode = false; draft = emptyRecord(state.settings.attendanceType); originalDraft = clone(draft); fillForm(draft); closeInterruptionEditor(); renderInterruptionList(); setLeaveToilExpanded(false);
-  renderAll(); showStatus(existed ? "Changes saved. Later balances have been recalculated." : "Record submitted and added to Timesheet History.");
+  if (!wasEditMode && !existed) advanceToNextAvailableRecordDate(date);
+  else {
+    editMode = false; draft = emptyRecord(state.settings.attendanceType); originalDraft = clone(draft); fillForm(draft); closeInterruptionEditor(); renderInterruptionList(); setLeaveToilExpanded(false); renderAll();
+  }
+  showStatus(existed ? "Changes saved. Later balances have been recalculated." : "Record submitted and added to Timesheet History.");
   if (submittedChanged) alert("This fortnight was previously submitted. The saved record has changed and the fortnight may need to be resubmitted.");
 }
 function guardWeekendSubmission(date, candidateRecord, submission) {
