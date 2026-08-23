@@ -24,6 +24,35 @@
     let modalRect = el("welcomeModal").querySelector(".dialog-card").getBoundingClientRect();
     assert(modalRect.left >= 0 && modalRect.right <= innerWidth && modalRect.height <= innerHeight, "welcome disclaimer is not contained by the viewport");
     el("closeWelcome").click(); assert(el("welcomeModal").hidden, "welcome disclaimer did not close");
+
+    assert(getComputedStyle(el("status")).color === "rgb(243, 240, 255)", "Record Date status text does not use the high-contrast lavender colour");
+    const installOptions = [...document.querySelectorAll("[data-install-platform]")];
+    assert(installOptions.length === 4, "Install Clocky does not show all four platform options");
+    document.querySelector('[data-install-platform="ios"]').click();
+    assert(!el("installModal").hidden && el("installModalContent").textContent.includes("Add to Home Screen"), "iOS Home Screen instructions are missing");
+    el("dismissInstallModal").click();
+    document.querySelector('[data-install-platform="windows"]').click();
+    assert(!el("installModal").hidden && el("installModalContent").textContent.includes("Chrome or Microsoft Edge"), "Windows install fallback instructions are missing");
+    el("dismissInstallModal").click();
+    document.querySelector('[data-install-platform="mac"]').click();
+    assert(!el("installModal").hidden && el("installModalContent").textContent.includes("Add to Dock"), "Mac Safari Add to Dock instructions are missing");
+    el("dismissInstallModal").click();
+    document.querySelector('[data-install-platform="android"]').click();
+    assert(!el("installModal").hidden && el("installModalContent").textContent.includes("Add to Home screen"), "Android install fallback instructions are missing");
+    el("dismissInstallModal").click();
+    const detectedPlatform = currentPlatform();
+    if (detectedPlatform && detectedPlatform !== "ios") {
+      let promptOpened = false;
+      const installPromptEvent = new Event("beforeinstallprompt", { cancelable: true });
+      Object.defineProperties(installPromptEvent, {
+        prompt: { value: async () => { promptOpened = true; } },
+        userChoice: { value: Promise.resolve({ outcome: "accepted" }) }
+      });
+      window.dispatchEvent(installPromptEvent);
+      await handleInstallChoice(detectedPlatform);
+      assert(promptOpened, "available browser PWA install prompt was not opened for the current platform");
+    }
+
     el("openFeedback").click();
     assert(!el("feedbackModal").hidden, "Feedback entry point did not open the modal");
     modalRect = el("feedbackModal").querySelector(".dialog-card").getBoundingClientRect();
