@@ -116,9 +116,10 @@
 
     input("lunchOut", "1230"); input("lunchIn", "1330");
     el("toggleInterruptions").click(); input("interruptionOut", "1000"); input("interruptionIn", "1030"); el("saveInterruption").click();
-    assert(!el("interruptionList").hidden && draft.morningOut === "10:00", "Additional Time Entry test setup failed");
+    el("toggleInterruptions").click(); input("interruptionOut", "1500"); input("interruptionIn", "1530"); el("saveInterruption").click();
+    assert(!el("interruptionList").hidden && draft.morningOut === "10:00" && draft.afternoonOut === "15:00", "two Additional Time Entry clear test setup failed");
     el("clearRecord").click();
-    assertRecordFormCleared("Additional Time Entry");
+    assertRecordFormCleared("Morning and Afternoon Additional Time Entries");
 
     const emptyDraftBeforeClear = JSON.stringify(draft), emptyStorageBeforeClear = localStorage.getItem(STORAGE_KEY);
     el("clearRecord").click();
@@ -245,22 +246,38 @@
     stored = JSON.parse(localStorage.getItem(STORAGE_KEY));
     assert(!stored.records[activeDate], "deleted record remains in storage");
 
-    input("startTime", "0900"); input("lunchOut", "1230"); input("lunchIn", "1330"); input("finishTime", "1720");
-    el("toggleInterruptions").click(); input("interruptionOut", "1500"); input("interruptionIn", "1530"); el("saveInterruption").click();
-    assert(metric("dailyResults", "Daily Hours") === "6:50", "Additional Time Entry preview Daily Hours is stale");
-    assert(metric("dailyResults", "Daily Flex Balance") === "-0:31", "Additional Time Entry preview Daily Flex is stale");
-    assert(metric("dailyResults", "Progressive Flex Balance") === "-0:31", "Additional Time Entry preview Progressive Flex is stale");
+    input("startTime", "0900"); input("lunchOut", "1200"); input("lunchIn", "1300"); input("finishTime", "1721");
+    el("toggleInterruptions").click();
+    assert(el("interruptionEditorTitle").textContent === "Morning Additional Time Entry", "first Additional Time Entry did not open the Morning editor");
+    input("interruptionOut", "1100"); input("interruptionIn", "1130"); el("saveInterruption").click();
+    assert(draft.morningOut === "11:00" && !draft.afternoonOut, "Morning Additional Time Entry was not saved independently");
+    assert(!el("toggleInterruptions").hidden && metric("dailyResults", "Daily Hours") === "6:51", "Morning-only entry or second-entry action is incorrect");
+    el("toggleInterruptions").click();
+    assert(el("interruptionEditorTitle").textContent === "Afternoon Additional Time Entry", "second Additional Time Entry did not open the Afternoon editor");
+    input("interruptionOut", "1500"); input("interruptionIn", "1520"); el("saveInterruption").click();
+    assert(draft.afternoonOut === "15:00" && draft.afternoonIn === "15:20", "Afternoon Additional Time Entry was not saved independently");
+    assert(el("interruptionList").textContent.includes("Morning Additional Time Entry") && el("interruptionList").textContent.includes("Afternoon Additional Time Entry"), "saved entries are not labelled Morning and Afternoon");
+    assert(el("toggleInterruptions").hidden, "Add Additional Time Entry remained available after both slots were saved");
+    assert(metric("dailyResults", "Daily Hours") === "6:31", "both Additional Time Entries were not subtracted from Daily Hours");
+    assert(metric("dailyResults", "Daily Flex Balance") === "-0:50", "both Additional Time Entries were not included in Daily Flex");
+    el("interruptionList").querySelector("[data-edit-interruption='morning']").click(); input("interruptionIn", "1120"); el("saveInterruption").click();
+    assert(draft.morningIn === "11:20" && draft.afternoonOut === "15:00" && draft.afternoonIn === "15:20", "editing Morning affected Afternoon");
+    assert(metric("dailyResults", "Daily Hours") === "6:41", "editing Morning did not refresh Daily Hours");
+    el("interruptionList").querySelector("[data-remove-interruption='morning']").click();
+    assert(!draft.morningOut && !draft.morningIn && draft.afternoonOut === "15:00" && draft.afternoonIn === "15:20", "removing Morning affected Afternoon");
+    assert(!el("toggleInterruptions").hidden && metric("dailyResults", "Daily Hours") === "7:01", "removing Morning did not restore the slot or calculations");
+    assert(metric("dailyResults", "Progressive Flex Balance") === "-0:20", "Additional Time Entry preview Progressive Flex is stale");
     assert(metric("dailyResults", "Progressive TOIL Balance") === "0:00", "Additional Time Entry preview TOIL is incorrect");
-    assert(metric("fortnightResults", "Hours Recorded This Period") === "6:50", "Fortnight hours do not match the preview");
-    assert(metric("fortnightResults", "Net Flex for the Period") === "-0:31", "Fortnight flex does not match the preview");
+    assert(metric("fortnightResults", "Hours Recorded This Period") === "7:01", "Fortnight hours do not match the two-entry preview");
+    assert(metric("fortnightResults", "Net Flex for the Period") === "-0:20", "Fortnight flex does not match the two-entry preview");
     el("submitRecord").click();
-    assert(metric("dailyResults", "Daily Hours") === "6:50", "Daily Hours became stale after Submit");
-    assert(metric("dailyResults", "Daily Flex Balance") === "-0:31", "Daily Flex became stale after Submit");
+    assert(metric("dailyResults", "Daily Hours") === "7:01", "Daily Hours became stale after Submit");
+    assert(metric("dailyResults", "Daily Flex Balance") === "-0:20", "Daily Flex became stale after Submit");
     el("recordsBody").querySelector(`[data-edit="${activeDate}"]`).click();
-    el("interruptionList").querySelector("[data-edit-interruption='afternoon']").click(); input("interruptionIn", "1520"); el("saveInterruption").click();
-    assert(metric("dailyResults", "Daily Hours") === "7:00" && metric("dailyResults", "Daily Flex Balance") === "-0:21" && metric("fortnightResults", "Hours Recorded This Period") === "7:00" && metric("fortnightResults", "Net Flex for the Period") === "-0:21", "Editing Additional Time Entry did not update both displays");
+    el("interruptionList").querySelector("[data-edit-interruption='afternoon']").click(); input("interruptionIn", "1510"); el("saveInterruption").click();
+    assert(metric("dailyResults", "Daily Hours") === "7:11" && metric("dailyResults", "Daily Flex Balance") === "-0:10" && metric("fortnightResults", "Hours Recorded This Period") === "7:11" && metric("fortnightResults", "Net Flex for the Period") === "-0:10", "Editing Afternoon did not update both displays");
     el("interruptionList").querySelector("[data-remove-interruption='afternoon']").click();
-    assert(metric("dailyResults", "Daily Hours") === "7:20" && metric("dailyResults", "Daily Flex Balance") === "-0:01" && metric("fortnightResults", "Hours Recorded This Period") === "7:20" && metric("fortnightResults", "Net Flex for the Period") === "-0:01", "Removing Additional Time Entry did not update both displays");
+    assert(metric("dailyResults", "Daily Hours") === "7:21" && metric("dailyResults", "Daily Flex Balance") === "0:00" && metric("fortnightResults", "Hours Recorded This Period") === "7:21" && metric("fortnightResults", "Net Flex for the Period") === "0:00", "Removing Afternoon did not update both displays");
     el("cancelEdit").click();
     el("recordsBody").querySelector(`[data-delete="${activeDate}"]`).click();
 

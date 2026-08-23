@@ -12,7 +12,7 @@ On first use, save a Thursday as the required **Fortnight Start Date** in Settin
 
 Use the **Year** and **Month** filters to find older timesheets, then choose one of the fortnights that overlaps that month. The summary, saved-record list, status, editing, and CSV export all follow the selected fortnight. Previous records remain in localStorage when a new fortnight begins. CSV backup filenames use the period dates, for example `Timesheet_2026-08-20_to_2026-09-02.csv`.
 
-The normal work form shows Start Work, Lunch Out, Lunch In, and Finish Work. Use **+ Add Additional Time Entry** to enter a simple Out/In interval. The app places it into the existing before-lunch or after-lunch storage fields automatically; an interval that overlaps lunch is rejected. Version 1 supports one Additional Time Entry before lunch and one after lunch.
+The normal work form shows Start Work, Lunch Out, Lunch In, and Finish Work. Use **+ Add Additional Time Entry** to add one optional Morning entry and then one optional Afternoon entry. Each saved entry can be edited or removed independently; an interval that overlaps lunch is rejected.
 
 On the final Wednesday, the app displays a submission reminder. Marking it submitted saves that status locally and offers to export a backup CSV. Unsubmitted ended fortnights appear as overdue, and edits to a submitted fortnight display a resubmission warning.
 

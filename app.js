@@ -208,10 +208,12 @@ function clearRecordForm() {
 }
 
 function openInterruptionEditor(slot = "") {
-  editingInterruption = slot;
-  const prefix = slot === "morning" ? "morning" : slot === "afternoon" ? "afternoon" : "";
-  el("interruptionOut").value = prefix ? draft[`${prefix}Out`] : "";
-  el("interruptionIn").value = prefix ? draft[`${prefix}In`] : "";
+  const nextSlot = slot || (!(draft.morningOut || draft.morningIn) ? "morning" : !(draft.afternoonOut || draft.afternoonIn) ? "afternoon" : "");
+  if (!nextSlot) return;
+  editingInterruption = nextSlot;
+  el("interruptionEditorTitle").textContent = `${nextSlot === "morning" ? "Morning" : "Afternoon"} Additional Time Entry`;
+  el("interruptionOut").value = draft[`${nextSlot}Out`] || "";
+  el("interruptionIn").value = draft[`${nextSlot}In`] || "";
   el("interruptionEditor").hidden = false;
   originalInterruptionEditor = interruptionEditorSnapshot();
   el("interruptionOut").focus();
@@ -228,15 +230,9 @@ function saveInterruption() {
   const lunchOut = normalizeClockTime(draft.lunchOut), lunchIn = normalizeClockTime(draft.lunchIn);
   if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(out) || !/^([01]\d|2[0-3]):[0-5]\d$/.test(incoming) || out >= incoming) { alert("Enter a complete Additional Time Entry with an Out time before its In time."); return; }
   if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(lunchOut) || !/^([01]\d|2[0-3]):[0-5]\d$/.test(lunchIn) || lunchOut >= lunchIn) { alert("Enter valid Lunch Out and Lunch In times before adding an Additional Time Entry, so it can be placed correctly."); return; }
-  let slot = "";
-  if (incoming <= lunchOut) slot = "morning";
-  else if (out >= lunchIn) slot = "afternoon";
-  else { alert("The Additional Time Entry overlaps the lunch period. Please adjust its Out and In times."); return; }
-  if (!editingInterruption && (draft[`${slot}Out`] || draft[`${slot}In`])) { alert(`Only one Additional Time Entry ${slot === "morning" ? "before lunch" : "after lunch"} is allowed in Version 1.`); return; }
-  if (editingInterruption !== slot && (draft[`${slot}Out`] || draft[`${slot}In`])) { alert(`An Additional Time Entry ${slot === "morning" ? "before lunch" : "after lunch"} already exists.`); return; }
-  if (editingInterruption && editingInterruption !== slot) {
-    draft[`${editingInterruption}Out`] = ""; draft[`${editingInterruption}In`] = "";
-  }
+  const slot = editingInterruption;
+  if (slot === "morning" && incoming > lunchOut) { alert("Morning Additional Time Entry must finish before Lunch Out."); return; }
+  if (slot === "afternoon" && out < lunchIn) { alert("Afternoon Additional Time Entry must start after Lunch In."); return; }
   draft[`${slot}Out`] = out; draft[`${slot}In`] = incoming;
   closeInterruptionEditor(); renderInterruptionList(); renderCurrentPreview(); updateActionState();
 }
@@ -246,11 +242,12 @@ function removeInterruption(slot) {
 }
 function renderInterruptionList() {
   const items = [
-    { slot:"morning", out:draft.morningOut, incoming:draft.morningIn },
-    { slot:"afternoon", out:draft.afternoonOut, incoming:draft.afternoonIn }
-  ].filter(item => item.out || item.incoming).sort((a, b) => (a.out || a.incoming).localeCompare(b.out || b.incoming));
+    { slot:"morning", label:"Morning Additional Time Entry", out:draft.morningOut, incoming:draft.morningIn },
+    { slot:"afternoon", label:"Afternoon Additional Time Entry", out:draft.afternoonOut, incoming:draft.afternoonIn }
+  ].filter(item => item.out || item.incoming);
   const list = el("interruptionList"); list.hidden = items.length === 0;
-  list.innerHTML = items.map(item => `<div class="interruption-item"><strong>Additional Time Entry</strong><span>${item.out || "—"}–${item.incoming || "—"}</span><div><button class="link-button" data-edit-interruption="${item.slot}">Edit</button><button class="link-button danger" data-remove-interruption="${item.slot}">Remove</button></div></div>`).join("");
+  list.innerHTML = items.map(item => `<div class="interruption-item"><strong>${item.label}</strong><span>${item.out || "—"}–${item.incoming || "—"}</span><div><button class="link-button" data-edit-interruption="${item.slot}">Edit</button><button class="link-button danger" data-remove-interruption="${item.slot}">Remove</button></div></div>`).join("");
+  el("toggleInterruptions").hidden = Boolean((draft.morningOut || draft.morningIn) && (draft.afternoonOut || draft.afternoonIn));
   list.querySelectorAll("[data-edit-interruption]").forEach(button => button.addEventListener("click", () => openInterruptionEditor(button.dataset.editInterruption)));
   list.querySelectorAll("[data-remove-interruption]").forEach(button => button.addEventListener("click", () => removeInterruption(button.dataset.removeInterruption)));
 }

@@ -6,6 +6,12 @@ let day = C.calculateDay(base, 441);
 assert.deepEqual([day.morning, day.afternoon, day.daily, day.dailyFlex], [210, 231, 441, 0]);
 day = C.calculateDay({...base, morningOut:"10:00", morningIn:"10:15", afternoonOut:"15:00", afternoonIn:"15:10", finishTime:"17:16"}, 441);
 assert.deepEqual([day.morning, day.afternoon, day.daily], [195, 246, 441]);
+
+// Two fixed optional Additional Time Entry slots are calculated independently and together.
+const twoEntryDay = { ...base, lunchOut:"12:00", lunchIn:"13:00", finishTime:"17:21" };
+assert.equal(C.calculateDay({...twoEntryDay, morningOut:"11:00", morningIn:"11:30"}, 441).daily, 411);
+assert.equal(C.calculateDay({...twoEntryDay, afternoonOut:"15:00", afternoonIn:"15:20"}, 441).daily, 421);
+assert.equal(C.calculateDay({...twoEntryDay, morningOut:"11:00", morningIn:"11:30", afternoonOut:"15:00", afternoonIn:"15:20"}, 441).daily, 391);
 day = C.calculateDay({...base, leaveType:"Annual", leaveHours:"1:00"}, 441);
 assert.equal(day.daily, 501);
 day = C.calculateDay({...base, leaveType:"Flex", leaveHours:"0:30"}, 441);
