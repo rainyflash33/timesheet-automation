@@ -87,8 +87,8 @@
             </select>
           </label>
           <label>Fortnight start date <input id="fortnightStart" type="date"><span id="fortnightStartError" class="field-error" role="alert" hidden>Fortnight must start on a Thursday.</span></label>
-          <label>Opening Flex Balance <input id="openingFlex" data-duration data-setting-duration inputmode="decimal" placeholder="HMM" aria-describedby="openingFlexError"><span id="openingFlexError" class="field-error" role="alert" hidden>Enter a duration such as 721 or -130.</span></label>
-          <label>Opening TOIL Balance <input id="openingToil" data-duration data-setting-duration inputmode="numeric" placeholder="HMM" aria-describedby="openingToilError"><span id="openingToilError" class="field-error" role="alert" hidden>Enter digits with minutes from 00 to 59, for example 050.</span></label>
+          <label>Opening Flex Balance <input id="openingFlex" type="text" data-duration data-setting-duration inputmode="text" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="H:MM" aria-describedby="openingFlexError"><span id="openingFlexError" class="field-error" role="alert" hidden>Enter a signed duration such as 1:30 or -0:46.</span></label>
+          <label>Opening TOIL Balance <input id="openingToil" type="text" data-duration data-setting-duration inputmode="text" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="H:MM" aria-describedby="openingToilError"><span id="openingToilError" class="field-error" role="alert" hidden>Enter a signed duration such as 1:30 or -0:46.</span></label>
         </div>
         <h3>Standard hours by day</h3>
         <div id="weekdaySettings" class="weekday-grid"></div>
@@ -206,7 +206,7 @@
     </section>
   </div>
   <script src="calculator.js"></script>
-  <script src="app.js?v=sog-date-display-v1"></script>
+  <script src="app.js?v=signed-opening-balances-v1"></script>
   <script src="pwa-register.js?v=install-clocky-v1"></script>
 </body>
 </html>

@@ -80,6 +80,15 @@ assert.equal(mixedBalances["2026-08-21"].progressiveToil, 30);
 assert.equal(C.isSeniorOfficer("Senior Officer"), true);
 assert.equal(C.isSeniorOfficer("Senior Officer A/B"), true);
 
+const signedFlexOpening = C.recalculate({
+  "2026-08-24": {...base, finishTime:"17:51"}
+}, {...settings, openingFlex:"-0:46"});
+assert.equal(signedFlexOpening["2026-08-24"].progressiveFlex, 14);
+const signedToilOpening = C.recalculate({
+  "2026-08-24": {...base, toilHours:"1:00"}
+}, {...settings, openingToil:"-0:30"});
+assert.equal(signedToilOpening["2026-08-24"].progressiveToil, 30);
+
 const flexLeaveDate = "2026-08-20";
 let flexBalances = C.recalculate(
   {[flexLeaveDate]: {...fullDayAnnualLeave, leaveType:"Flex"}},
