@@ -1,5 +1,5 @@
 const CACHE_PREFIX = "clocky-shell-";
-const CACHE_NAME = `${CACHE_PREFIX}v1`;
+const CACHE_NAME = `${CACHE_PREFIX}v2`;
 const APP_SHELL = [
   "./",
   "./index.html",
@@ -7,13 +7,13 @@ const APP_SHELL = [
   "./calculator.js",
   "./app.js?v=feedback-mailto-v1",
   "./pwa-register.js",
-  "./manifest.webmanifest",
+  "./manifest.webmanifest?v=clocky-icon-v2",
   "./assets/clocky-hero-office.jpeg",
-  "./assets/icons/clocky-192.png",
-  "./assets/icons/clocky-512.png",
-  "./assets/icons/apple-touch-icon.png",
-  "./assets/icons/clocky-maskable-192.png",
-  "./assets/icons/clocky-maskable-512.png"
+  "./assets/icons/clocky-icon-192.png?v=clocky-icon-v2",
+  "./assets/icons/clocky-icon-512.png?v=clocky-icon-v2",
+  "./assets/icons/clocky-apple-touch-icon-180.png?v=clocky-icon-v2",
+  "./assets/icons/clocky-icon-maskable-192.png?v=clocky-icon-v2",
+  "./assets/icons/clocky-icon-maskable-512.png?v=clocky-icon-v2"
 ];
 const CACHEABLE_PATHS = new Set(APP_SHELL.map(path => new URL(path, self.location.href).pathname));
 
