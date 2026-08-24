@@ -26,6 +26,17 @@
     renderSettings(); loadRecord(activeDate, true);
     assert(el("settingsContent").hidden && el("settingsToggle").getAttribute("aria-expanded") === "false" && el("settingsToggleButton").textContent === "+", "Settings did not start collapsed");
     assert(el("historicalContent").hidden && el("historicalToggle").getAttribute("aria-expanded") === "false" && el("historicalToggleButton").textContent === "+", "Historical Timesheets did not start collapsed");
+    const initialPreviousStart = C.addDays(periodFor(todayISO()).start, -14);
+    state.submissions[initialPreviousStart] = {submitted:true, changed:false}; renderAll();
+    const mainLayout = document.querySelector("main"), primaryFlowStyle = getComputedStyle(el("primaryEntryFlow")), heroStyle = getComputedStyle(document.querySelector(".hero")), dailyEntryStyle = getComputedStyle(el("dailyEntryCard"));
+    assert(mainLayout.classList.contains("layout-unified") && el("submissionReminder").hidden, "no-reminder state did not select the unified hero and Daily Entry layout");
+    assert(primaryFlowStyle.overflow === "hidden" && primaryFlowStyle.backgroundColor !== "rgba(0, 0, 0, 0)" && heroStyle.borderBottomLeftRadius === "0px" && dailyEntryStyle.marginTop === "0px" && dailyEntryStyle.borderTopWidth === "0px" && dailyEntryStyle.borderBottomWidth === "0px" && dailyEntryStyle.borderTopLeftRadius === "0px" && dailyEntryStyle.boxShadow === "none", "unified layout has a gap, shadow seam, separate card border, or doubled radius at the hero/Daily Entry join");
+    assert(getComputedStyle(document.querySelector(".hero"), "::after").backgroundImage.includes("linear-gradient") && getComputedStyle(document.querySelector(".hero"), "::after").height === "28px", "unified hero does not have the requested short CSS fade into Daily Entry");
+    showStatus("Draft saved");
+    assert(getComputedStyle(el("status")).backgroundColor === getComputedStyle(el("dailyEntryCard")).backgroundColor && getComputedStyle(el("status")).borderTopWidth === "0px" && getComputedStyle(el("status")).boxShadow === "none", "Draft saved introduced a separate status surface or divider");
+    showStatus("Fortnight marked as submitted.");
+    assert(mainLayout.classList.contains("layout-unified") && getComputedStyle(el("status")).color === "rgb(104, 72, 168)" && getComputedStyle(el("status")).backgroundColor === getComputedStyle(el("dailyEntryCard")).backgroundColor, "informational status is not purple text on the exact Daily Entry surface");
+    showStatus(""); state.submissions = {}; renderAll();
     el("historicalToggle").click();
     assert(!el("historicalContent").hidden && el("historicalToggle").getAttribute("aria-expanded") === "true" && el("historicalToggleButton").textContent === "−", "Historical Timesheets did not expand normally");
     el("historicalToggle").click();
@@ -36,7 +47,8 @@
     assert(el("dailyBalanceHeading").textContent === "Daily Flex" && el("progressiveBalanceHeading").textContent === "Progressive Flex", "Flextime history headings are incorrect");
     assert(!document.querySelector(".danger-zone h3") && document.querySelector(".danger-zone-title").textContent === "Delete All Saved Timesheet Records", "reset section cosmetic title is incorrect");
     assert(getComputedStyle(document.querySelector(".danger-zone")).borderTopStyle !== "none", "reset section divider was removed");
-    assert(document.querySelector('script[src="app.js?v=csv-date-format-v1"]'), "page is not loading the cache-busted CSV-date-format application bundle");
+    assert(document.querySelector('script[src="app.js?v=hero-status-layout-v1"]'), "page is not loading the cache-busted hero-status-layout application bundle");
+    assert(document.querySelector('link[href="styles.css?v=settings-helper-layout-v1"]'), "page is not loading the cache-busted Settings helper-layout stylesheet");
     assert([...document.querySelector(".history-filters").children].map(control => control.tagName === "LABEL" ? control.childNodes[0].textContent.trim() : control.textContent.trim()).join("|") === "Year|Month|Fortnight|Export", "Historical Timesheets controls are not ordered Year, Month, Fortnight, Export");
     assert(el("exportSelectedFortnight").classList.contains("secondary") && el("exportMultiplePeriods").classList.contains("secondary") && el("exportMultiplePeriods").textContent === "Export", "Historical Timesheets export actions do not share the secondary utility style or wording");
     assert(getComputedStyle(document.querySelector(".multi-period-export")).borderTopStyle === "none" && getComputedStyle(document.querySelector(".multi-period-export h3")).color === "rgb(81, 74, 92)", "Export Multiple Periods heading or divider styling is incorrect");
@@ -47,7 +59,7 @@
     assert(modalRect.left >= 0 && modalRect.right <= innerWidth && modalRect.height <= innerHeight, "welcome disclaimer is not contained by the viewport");
     el("closeWelcome").click(); assert(el("welcomeModal").hidden, "welcome disclaimer did not close");
 
-    assert(getComputedStyle(el("status")).color === "rgb(243, 240, 255)", "Record Date status text does not use the high-contrast lavender colour");
+    assert(getComputedStyle(el("status")).color === "rgb(104, 72, 168)", "unified status text does not use the primary purple colour");
     assert(getComputedStyle(el("status")).fontWeight === "600", "status and feedback messages are not displayed at the requested font weight");
     assert(formatReminderDate("2026-08-06") === "06 Aug 2026" && formatReminderDate("2026-09-02") === "02 Sep 2026", "submission reminder date format is incorrect");
     const installOptions = [...document.querySelectorAll("[data-install-platform]")];
@@ -594,6 +606,7 @@
     const overdueStart = "2026-08-06";
     state.records = {[overdueStart]:clone(exportRecord)}; state.submissions = {}; viewStart = overdueStart; save(); renderAll();
     assert(!el("submissionReminder").hidden && reminderStart === overdueStart, "overdue fortnight reminder test setup failed");
+    assert(mainLayout.classList.contains("layout-actionable") && !mainLayout.classList.contains("layout-unified") && getComputedStyle(el("primaryEntryFlow")).backgroundColor === "rgba(0, 0, 0, 0)" && getComputedStyle(el("primaryEntryFlow")).overflow === "visible" && getComputedStyle(el("submissionReminder")).marginTop === "20px" && getComputedStyle(el("dailyEntryCard")).marginTop === "20px" && getComputedStyle(el("dailyEntryCard")).borderTopWidth !== "0px" && getComputedStyle(document.querySelector(".hero"), "::after").content === "none", "actionable reminder did not select the separated hero/reminder/Daily Entry layout");
     let exportPromptCount = 0;
     window.confirm = message => { if (/CSV|export|share/i.test(message)) exportPromptCount++; return true; };
     el("markSubmitted").click();
@@ -601,6 +614,7 @@
     assert(state.submissions[overdueStart]?.submitted && state.submissions[overdueStart]?.changed === false, "Mark fortnight as submitted did not preserve the existing submission state logic");
     assert(exportPromptCount === 0, "Mark fortnight as submitted triggered an export/download/share prompt");
     assert(el("submissionReminder").hidden && el("status").textContent === "Fortnight marked as submitted.", "submitted reminder or success feedback did not update normally");
+    assert(mainLayout.classList.contains("layout-unified") && getComputedStyle(el("status")).color === "rgb(104, 72, 168)" && getComputedStyle(el("dailyEntryCard")).marginTop === "0px", "submitted informational status did not return to the unified layout");
 
     // A submitted fortnight warns only on the persisted false -> true changed-state transition.
     const resubmissionWarning = "This fortnight was previously submitted. The saved record has changed and the fortnight may need to be resubmitted.";
@@ -683,6 +697,14 @@
       assert(Math.max(...settingsWidths) - Math.min(...settingsWidths) <= 1, "tablet Settings fields are not evenly balanced");
       assert(settingsHeights.join(",") === "38,36,38,38", `tablet Settings input heights are incorrect: ${settingsHeights.join(",")}`);
     }
+    setSettingsExpanded(true);
+    change("fortnightStart", "2026-08-21");
+    const settingsInputsWithError = [el("attendanceTypeSetting"), el("fortnightStart"), el("openingFlex"), el("openingToil")];
+    const settingsInputTopsWithError = settingsInputsWithError.map(input => Math.round(input.getBoundingClientRect().top));
+    assert(!el("fortnightStartError").hidden, "Fortnight Thursday validation message was not shown");
+    if (innerWidth > 600) assert(new Set(settingsInputTopsWithError).size === 1, "Settings inputs moved out of alignment when the fortnight validation message appeared");
+    assert(el("fortnightStartError").getBoundingClientRect().top >= el("fortnightStart").getBoundingClientRect().bottom, "Fortnight validation message is not below its date input");
+    assert(document.documentElement.scrollWidth <= document.documentElement.clientWidth, "Settings validation layout introduced horizontal overflow");
     if (innerWidth <= 600) assert(Math.round(parseFloat(getComputedStyle(el("fortnightStart")).height)) === 48, "mobile Fortnight Start Date is not 48px high");
     window.scrollTo(0, 0);
     result.textContent = "PASS: Copy Previous record date summary colours attendance settings Leave TOIL welcome Feedback shared durations email CSV validation synchronized calculations responsive workflow";

@@ -1,4 +1,4 @@
-:root { color-scheme: light; font-family: Inter, ui-sans-serif, system-ui, -apple-system, sans-serif; color: #24212b; background: #5f596f; }
+:root { --unified-entry-surface: #f7f6f9; color-scheme: light; font-family: Inter, ui-sans-serif, system-ui, -apple-system, sans-serif; color: #24212b; background: #5f596f; }
 * { box-sizing: border-box; }
 html, body { min-height: 100%; margin: 0; background: #5f596f; }
 body { min-height: 100vh; }
@@ -70,6 +70,9 @@ button:hover { background: #56378f; }
 .inline-status { align-self: center; color: #6848a8; font-size: .85rem; font-weight: 700; }
 .inline-status.error { color: #a32d2d; }
 .field-error { color: #a32d2d; font-size: .78rem; font-weight: 650; }
+.settings .form-grid > label { grid-template-rows: minmax(1.2em, auto) auto minmax(1.35em, auto); align-content: start; }
+.settings .form-grid .field-error[hidden] { display: block; visibility: hidden; }
+.settings .form-grid .field-helper-placeholder { display: block; min-height: 1.35em; }
 .row-actions { display: flex; gap: 12px; }
 .history-heading { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: auto auto; align-items: center; column-gap: 16px; row-gap: 8px; margin-bottom: 18px; }
 .history-heading h2 { grid-column: 1; grid-row: 1; margin: 0; }
@@ -120,6 +123,16 @@ textarea:focus { outline: 3px solid rgba(107,76,166,.18); border-color: #7454b3;
 .status:not(:empty) + .submission-reminder { margin-top: 0; }
 .status:not(:empty) + .submission-reminder[hidden] + .card { margin-top: 0; }
 .status.error { color: #a32d2d; }
+.layout-unified > .primary-entry-flow { overflow: hidden; border-radius: 18px 18px 16px 16px; background: var(--unified-entry-surface); }
+.layout-unified .hero { border-radius: 18px 18px 0 0; box-shadow: none; }
+.layout-unified .hero::after { content: ""; position: absolute; z-index: 1; right: 0; bottom: 0; left: 0; height: 28px; background: linear-gradient(to bottom, transparent 0%, var(--unified-entry-surface) 88%, var(--unified-entry-surface) 100%); pointer-events: none; }
+.layout-unified #status { margin: 0; padding: 11px 24px; border: 0; outline: 0; background: transparent; box-shadow: none; color: #6848a8; }
+.layout-unified #status:empty { padding-top: 0; padding-bottom: 0; }
+.layout-unified #status.error { color: #a32d2d; }
+.layout-unified #dailyEntryCard { margin-top: 0; border: 0; border-radius: 0; background: transparent; box-shadow: none; }
+.layout-actionable > .primary-entry-flow { overflow: visible; background: transparent; }
+.layout-actionable .submission-reminder { margin-top: 20px; }
+.layout-actionable .submission-reminder + #dailyEntryCard { margin-top: 20px; }
 .submission-reminder { margin-top: 12px; padding: 16px 18px; border: 1px solid #d7c9ed; border-radius: 12px; background: #f3eefb; display: flex; align-items: center; justify-content: space-between; gap: 18px; }
 .submission-reminder[hidden] { display: none; }
 .submission-reminder p { margin: 4px 0 0; color: #6b5b7e; font-size: .85rem; }

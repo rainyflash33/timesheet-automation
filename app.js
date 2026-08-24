@@ -777,7 +777,7 @@ function renderFortnightStatus() {
 
 function renderSubmissionReminder() {
   const box = el("submissionReminder"); reminderStart = "";
-  if (!fortnightCalculationAllowed()) { box.hidden = true; return; }
+  if (!fortnightCalculationAllowed()) { box.hidden = true; setPrimaryLayoutState(false); return; }
   const today = todayISO();
   const currentStart = C.fortnightFor(today, state.settings.fortnightStart).start;
   const previousStart = C.addDays(currentStart, -14);
@@ -795,12 +795,18 @@ function renderSubmissionReminder() {
     return b.start.localeCompare(a.start);
   });
   const period = candidates[0];
-  if (!period) { box.hidden = true; return; }
+  if (!period) { box.hidden = true; setPrimaryLayoutState(false); return; }
   reminderStart = period.start; box.hidden = false;
+  setPrimaryLayoutState(true);
   if (period.submission.changed) el("submissionMessage").textContent = "Submitted fortnight changed — please review and resubmit if needed.";
   else if (today === period.end) el("submissionMessage").textContent = "Timesheet due — please review and submit this fortnight.";
   else el("submissionMessage").textContent = "Timesheet overdue — please review and submit this fortnight.";
   el("submissionPeriod").textContent = `${formatReminderDate(period.start)} to ${formatReminderDate(period.end)}`;
+}
+function setPrimaryLayoutState(actionable) {
+  const main = document.querySelector("main");
+  main.classList.toggle("layout-actionable", actionable);
+  main.classList.toggle("layout-unified", !actionable);
 }
 
 function markFortnightSubmitted() {

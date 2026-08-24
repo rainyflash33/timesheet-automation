@@ -11,10 +11,11 @@
   <link rel="manifest" href="manifest.webmanifest?v=clocky-icon-v2">
   <link rel="icon" type="image/png" sizes="192x192" href="assets/icons/clocky-icon-192.png?v=clocky-icon-v2">
   <link rel="apple-touch-icon" sizes="180x180" href="assets/icons/clocky-apple-touch-icon-180.png?v=clocky-icon-v2">
-  <link rel="stylesheet" href="styles.css?v=combined-csv-v1">
+  <link rel="stylesheet" href="styles.css?v=settings-helper-layout-v1">
 </head>
 <body>
-  <main>
+  <main class="layout-unified">
+    <div id="primaryEntryFlow" class="primary-entry-flow">
     <header class="hero">
       <div class="hero-content">
         <div class="brand-block">
@@ -32,7 +33,7 @@
       <button id="markSubmitted">Mark fortnight as submitted</button>
     </section>
 
-    <section class="card" aria-label="Work times">
+    <section id="dailyEntryCard" class="card" aria-label="Work times">
       <h2>Daily Entry</h2>
       <div id="basicFields" class="basic-time-fields"></div>
       <button id="toggleInterruptions" class="secondary interruption-toggle">+ Add Additional Time Entry</button>
@@ -55,6 +56,7 @@
         <button id="cancelEdit" class="secondary" hidden>Cancel Edit</button>
       </div>
     </section>
+    </div>
 
     <section class="card">
       <h2>Calculated for this date</h2>
@@ -84,8 +86,9 @@
               <option value="Flextime">Flextime</option>
               <option value="Senior Officer A/B">Senior Officer A/B</option>
             </select>
+            <span class="field-helper-placeholder" aria-hidden="true"></span>
           </label>
-          <label>Fortnight start date <input id="fortnightStart" type="date"><span id="fortnightStartError" class="field-error" role="alert" hidden>Fortnight must start on a Thursday.</span></label>
+          <label>Fortnight start date <input id="fortnightStart" type="date" aria-describedby="fortnightStartError"><span id="fortnightStartError" class="field-error" role="alert" hidden>Fortnight must start on a Thursday.</span></label>
           <label>Opening Flex Balance <input id="openingFlex" type="text" data-duration data-setting-duration inputmode="text" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="H:MM" aria-describedby="openingFlexError"><span id="openingFlexError" class="field-error" role="alert" hidden>Enter a signed duration such as 1:30 or -0:46.</span></label>
           <label>Opening TOIL Balance <input id="openingToil" type="text" data-duration data-setting-duration inputmode="text" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="H:MM" aria-describedby="openingToilError"><span id="openingToilError" class="field-error" role="alert" hidden>Enter a signed duration such as 1:30 or -0:46.</span></label>
         </div>
@@ -245,7 +248,7 @@
     </section>
   </div>
   <script src="calculator.js"></script>
-  <script src="app.js?v=csv-date-format-v1"></script>
+  <script src="app.js?v=hero-status-layout-v1"></script>
   <script src="pwa-register.js?v=install-clocky-v1"></script>
 </body>
 </html>
