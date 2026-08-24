@@ -136,7 +136,7 @@ th, td { padding: 11px 8px; border-bottom: 1px solid #eeeaf2; text-align: left; 
 .multi-period-export h3 { margin: 0 0 14px; color: #514a5c; }
 .multi-period-fields { display: grid; grid-template-columns: minmax(150px, 1fr) minmax(150px, 1fr) auto; gap: 14px; align-items: start; }
 .multi-period-fields button { align-self: end; }
-#workbookExportStatus { min-height: 1.25em; margin: 10px 0 0; }
+#multiplePeriodExportStatus { min-height: 1.25em; margin: 10px 0 0; }
 .install-card h2 { margin-bottom: 14px; }
 .install-options { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
 .install-option { display: grid; grid-template-columns: 28px 1fr; grid-template-rows: auto auto; column-gap: 10px; row-gap: 3px; min-width: 0; min-height: 76px; padding: 12px; border: 1px solid #ded5ec; background: #f7f3fc; color: #514a5c; text-align: left; }

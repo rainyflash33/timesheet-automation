@@ -130,11 +130,11 @@ function buildUI() {
   el("filterMonth").addEventListener("change", () => changePeriodFilter(filterYear, Number(el("filterMonth").value)));
   el("exportSelectedFortnight").addEventListener("click", () => exportCsv(viewStart));
   ["exportPeriodFrom", "exportPeriodTo"].forEach(id => {
-    el(id).addEventListener("input", () => clearWorkbookDateError(id));
-    el(id).addEventListener("change", () => normalizeWorkbookDateField(id));
-    el(id).addEventListener("blur", () => normalizeWorkbookDateField(id));
+    el(id).addEventListener("input", () => clearExportDateError(id));
+    el(id).addEventListener("change", () => normalizeExportDateField(id));
+    el(id).addEventListener("blur", () => normalizeExportDateField(id));
   });
-  el("exportWorkbook").addEventListener("click", () => exportWorkbook());
+  el("exportMultiplePeriods").addEventListener("click", () => exportMultiplePeriodsCsv());
   el("toggleInterruptions").addEventListener("click", () => openInterruptionEditor());
   el("submitRecord").addEventListener("click", submitRecord);
   el("saveDraft").addEventListener("click", saveDraft);
@@ -890,10 +890,15 @@ function resetTimesheetHistory() {
 }
 function showStatus(message, error = false) { el("status").textContent = message; el("status").classList.toggle("error", error); }
 
+function formatCsvDate(iso) {
+  const [year, month, day] = String(iso).split("-");
+  return `${day}-${month}-${year}`;
+}
 function buildCsvPackage(start = viewStart) {
   const period = { start, end: C.addDays(start, 13) };
   const headers = ["Date", "Start Time", "Morning Out", "Morning In", "Lunch Out", "Lunch In", "Afternoon Out", "Afternoon In", "Finish Time", "Leave Type", "Leave Hours", "Standard Hours", "Attendance Type", "TOIL Hours", "Daily Hours"];
-  const rows = [headers, ...C.buildFortnightExportRows(state.records, state.settings, start)];
+  const exportRows = C.buildFortnightExportRows(state.records, state.settings, start).map(([date, ...values]) => [formatCsvDate(date), ...values]);
+  const rows = [headers, ...exportRows];
   const csv = rows.map(row => row.map(value => `"${String(value ?? "").replaceAll('"','""')}"`).join(",")).join("\r\n");
   const filename = `Timesheet_${period.start}_to_${period.end}.csv`;
   const blob = new Blob(["\ufeff" + csv], {type:"text/csv;charset=utf-8"});
@@ -909,7 +914,7 @@ function exportCsv(start = viewStart) {
   if (!ensureValidAnchor()) return;
   downloadCsvPackage(buildCsvPackage(start));
 }
-function parseWorkbookDate(value) {
+function parseExportDate(value) {
   const raw = String(value || "").trim().replace(/\s+/g, " ");
   const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
   let match = /^(\d{1,2})\s+(\d{1,2})\s+(\d{2}|\d{4})$/.exec(raw);
@@ -929,23 +934,23 @@ function parseWorkbookDate(value) {
   const iso = `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
   return { iso, display:`${String(day).padStart(2, "0")} ${months[month - 1]} ${year}` };
 }
-function clearWorkbookDateError(id) {
+function clearExportDateError(id) {
   el(`${id}Error`).hidden = true;
   el(`${id}Error`).textContent = "Enter a valid date in DD MM YYYY format.";
   el(id).removeAttribute("aria-invalid");
-  el("workbookExportStatus").textContent = "";
-  el("workbookExportStatus").classList.remove("error");
+  el("multiplePeriodExportStatus").textContent = "";
+  el("multiplePeriodExportStatus").classList.remove("error");
 }
-function normalizeWorkbookDateField(id) {
+function normalizeExportDateField(id) {
   const input = el(id);
-  if (!input.value.trim()) { clearWorkbookDateError(id); return null; }
-  const parsed = parseWorkbookDate(input.value);
+  if (!input.value.trim()) { clearExportDateError(id); return null; }
+  const parsed = parseExportDate(input.value);
   el(`${id}Error`).hidden = Boolean(parsed);
   input.setAttribute("aria-invalid", String(!parsed));
   if (parsed) input.value = parsed.display;
   return parsed;
 }
-function workbookPeriods(from, to) {
+function exportReportingPeriods(from, to) {
   const periods = [];
   for (let start = periodFor(from).start; start <= to; start = C.addDays(start, 14)) {
     const end = C.addDays(start, 13);
@@ -953,66 +958,38 @@ function workbookPeriods(from, to) {
   }
   return periods;
 }
-function workbookSheetName(start, end) {
-  const short = iso => { const [year, month, day] = iso.split("-").map(Number); return `${day} ${["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][month - 1]}`; };
-  return `${short(start)} - ${short(end)}`.slice(0, 31);
+function reportingPeriodLabel(start, end) {
+  return `${formatCsvDate(start)} to ${formatCsvDate(end)}`;
 }
-function xmlEscape(value) { return String(value ?? "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&apos;"); }
-function worksheetXml(rows) {
-  const columnName = index => { let name = ""; for (let value = index + 1; value; value = Math.floor((value - 1) / 26)) name = String.fromCharCode(65 + (value - 1) % 26) + name; return name; };
-  const body = rows.map((row, rowIndex) => `<row r="${rowIndex + 1}">${row.map((value, columnIndex) => `<c r="${columnName(columnIndex)}${rowIndex + 1}" t="inlineStr"><is><t xml:space="preserve">${xmlEscape(value)}</t></is></c>`).join("")}</row>`).join("");
-  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>${body}</sheetData></worksheet>`;
-}
-function crc32(bytes) {
-  let crc = 0xffffffff;
-  for (const byte of bytes) { crc ^= byte; for (let bit = 0; bit < 8; bit++) crc = (crc >>> 1) ^ (0xedb88320 & -(crc & 1)); }
-  return (crc ^ 0xffffffff) >>> 0;
-}
-function zipStored(files) {
-  const encoder = new TextEncoder(), chunks = [], central = []; let offset = 0;
-  const uint16 = value => [value & 255, value >>> 8 & 255];
-  const uint32 = value => [value & 255, value >>> 8 & 255, value >>> 16 & 255, value >>> 24 & 255];
-  files.forEach(file => {
-    const name = encoder.encode(file.name), data = encoder.encode(file.content), crc = crc32(data);
-    const local = new Uint8Array([0x50,0x4b,0x03,0x04,...uint16(20),0,0,0,0,0,0,0,0,...uint32(crc),...uint32(data.length),...uint32(data.length),...uint16(name.length),0,0,...name]);
-    chunks.push(local, data);
-    central.push(new Uint8Array([0x50,0x4b,0x01,0x02,...uint16(20),...uint16(20),0,0,0,0,0,0,0,0,...uint32(crc),...uint32(data.length),...uint32(data.length),...uint16(name.length),0,0,0,0,0,0,0,0,0,0,0,0,...uint32(offset),...name]));
-    offset += local.length + data.length;
+function buildMultiplePeriodsCsvPackage(periods, from, to) {
+  const headers = ["Reporting Period", ...periods[0].rows[0]], rows = [headers];
+  periods.forEach((period, index) => {
+    if (index) rows.push([]);
+    const label = reportingPeriodLabel(period.start, period.end);
+    period.rows.slice(1).forEach(row => rows.push([label, ...row]));
   });
-  const centralSize = central.reduce((sum, part) => sum + part.length, 0), count = files.length;
-  return new Blob([...chunks, ...central, new Uint8Array([0x50,0x4b,0x05,0x06,0,0,0,0,...uint16(count),...uint16(count),...uint32(centralSize),...uint32(offset),0,0])], {type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"});
+  const csv = rows.map(row => row.length ? row.map(value => `"${String(value ?? "").replaceAll('"','""')}"`).join(",") : "").join("\r\n");
+  const filename = `Clocky_Timesheets_${from}_to_${to}.csv`;
+  const blob = new Blob(["\ufeff" + csv], {type:"text/csv;charset=utf-8"});
+  const file = typeof File === "function" ? new File([blob], filename, {type:blob.type}) : null;
+  return { blob, csv, file, filename, periods, rows };
 }
-function buildWorkbookPackage(periods, from, to) {
-  const sheets = periods.map(period => ({ ...period, name:workbookSheetName(period.start, period.end) }));
-  const contentTypes = sheets.map((_, index) => `<Override PartName="/xl/worksheets/sheet${index + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`).join("");
-  const workbookSheets = sheets.map((sheet, index) => `<sheet name="${xmlEscape(sheet.name)}" sheetId="${index + 1}" r:id="rId${index + 1}"/>`).join("");
-  const relationships = sheets.map((_, index) => `<Relationship Id="rId${index + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${index + 1}.xml"/>`).join("");
-  const files = [
-    {name:"[Content_Types].xml", content:`<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>${contentTypes}</Types>`},
-    {name:"_rels/.rels", content:`<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>`},
-    {name:"xl/workbook.xml", content:`<?xml version="1.0" encoding="UTF-8"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>${workbookSheets}</sheets></workbook>`},
-    {name:"xl/_rels/workbook.xml.rels", content:`<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${relationships}</Relationships>`},
-    ...sheets.map((sheet, index) => ({name:`xl/worksheets/sheet${index + 1}.xml`, content:worksheetXml(sheet.rows)}))
-  ];
-  const filename = `Clocky_Timesheets_${from}_to_${to}.xlsx`;
-  return { blob:zipStored(files), filename, sheets, files };
-}
-function downloadWorkbookPackage(workbook) {
-  const link = document.createElement("a"); link.href = URL.createObjectURL(workbook.blob); link.download = workbook.filename; link.click();
+function downloadMultiplePeriodsCsv(csvPackage) {
+  const link = document.createElement("a"); link.href = URL.createObjectURL(csvPackage.blob); link.download = csvPackage.filename; link.click();
   setTimeout(() => URL.revokeObjectURL(link.href), 1000);
 }
-function exportWorkbook(options = {}) {
+function exportMultiplePeriodsCsv(options = {}) {
   if (!ensureValidAnchor()) return "invalid";
-  const from = normalizeWorkbookDateField("exportPeriodFrom"), to = normalizeWorkbookDateField("exportPeriodTo");
-  if (!from || !to) { el("workbookExportStatus").textContent = "Enter valid From and To dates."; el("workbookExportStatus").classList.add("error"); return "invalid"; }
+  const from = normalizeExportDateField("exportPeriodFrom"), to = normalizeExportDateField("exportPeriodTo");
+  if (!from || !to) { el("multiplePeriodExportStatus").textContent = "Enter valid From and To dates."; el("multiplePeriodExportStatus").classList.add("error"); return "invalid"; }
   if (to.iso < from.iso) { el("exportPeriodToError").textContent = "Period To cannot be earlier than Period From."; el("exportPeriodToError").hidden = false; el("exportPeriodTo").setAttribute("aria-invalid", "true"); return "invalid-range"; }
   el("exportPeriodToError").textContent = "Enter a valid date in DD MM YYYY format.";
-  const periods = workbookPeriods(from.iso, to.iso);
-  if (!periods.length) { el("workbookExportStatus").textContent = "No timesheet records found for this period."; el("workbookExportStatus").classList.add("error"); return "empty"; }
-  const workbook = buildWorkbookPackage(periods, from.iso, to.iso);
-  (options.download || downloadWorkbookPackage)(workbook);
-  el("workbookExportStatus").textContent = `${periods.length} reporting period${periods.length === 1 ? "" : "s"} exported.`; el("workbookExportStatus").classList.remove("error");
-  return workbook;
+  const periods = exportReportingPeriods(from.iso, to.iso);
+  if (!periods.length) { el("multiplePeriodExportStatus").textContent = "No timesheet records found for this period."; el("multiplePeriodExportStatus").classList.add("error"); return "empty"; }
+  const csvPackage = buildMultiplePeriodsCsvPackage(periods, from.iso, to.iso);
+  (options.download || downloadMultiplePeriodsCsv)(csvPackage);
+  el("multiplePeriodExportStatus").textContent = `${periods.length} reporting period${periods.length === 1 ? "" : "s"} exported.`; el("multiplePeriodExportStatus").classList.remove("error");
+  return csvPackage;
 }
 function emailIsValid(value) { return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim()); }
 function openEmailModal() {

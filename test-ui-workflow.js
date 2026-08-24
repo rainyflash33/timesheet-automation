@@ -36,9 +36,9 @@
     assert(el("dailyBalanceHeading").textContent === "Daily Flex" && el("progressiveBalanceHeading").textContent === "Progressive Flex", "Flextime history headings are incorrect");
     assert(!document.querySelector(".danger-zone h3") && document.querySelector(".danger-zone-title").textContent === "Delete All Saved Timesheet Records", "reset section cosmetic title is incorrect");
     assert(getComputedStyle(document.querySelector(".danger-zone")).borderTopStyle !== "none", "reset section divider was removed");
-    assert(document.querySelector('script[src="app.js?v=collapsed-sections-v1"]'), "page is not loading the cache-busted collapsed-sections application bundle");
+    assert(document.querySelector('script[src="app.js?v=csv-date-format-v1"]'), "page is not loading the cache-busted CSV-date-format application bundle");
     assert([...document.querySelector(".history-filters").children].map(control => control.tagName === "LABEL" ? control.childNodes[0].textContent.trim() : control.textContent.trim()).join("|") === "Year|Month|Fortnight|Export", "Historical Timesheets controls are not ordered Year, Month, Fortnight, Export");
-    assert(el("exportSelectedFortnight").classList.contains("secondary") && el("exportWorkbook").classList.contains("secondary") && el("exportWorkbook").textContent === "Export", "Historical Timesheets export actions do not share the secondary utility style or wording");
+    assert(el("exportSelectedFortnight").classList.contains("secondary") && el("exportMultiplePeriods").classList.contains("secondary") && el("exportMultiplePeriods").textContent === "Export", "Historical Timesheets export actions do not share the secondary utility style or wording");
     assert(getComputedStyle(document.querySelector(".multi-period-export")).borderTopStyle === "none" && getComputedStyle(document.querySelector(".multi-period-export h3")).color === "rgb(81, 74, 92)", "Export Multiple Periods heading or divider styling is incorrect");
 
     assert(!el("welcomeModal").hidden, "welcome disclaimer did not open on page load");
@@ -525,55 +525,57 @@
 
     const csvPackage = buildCsvPackage(viewStart);
     assert(csvPackage.rows.length === 15 && csvPackage.filename.endsWith(".csv"), "email CSV package does not contain the existing 14-day export");
-    const csvBeforeWorkbookTests = csvPackage.csv;
+    [["2026-08-06", "06-08-2026"], ["2026-08-18", "18-08-2026"], ["2026-09-02", "02-09-2026"], ["2026-12-31", "31-12-2026"]].forEach(([iso, expected]) => assert(formatCsvDate(iso) === expected, `${iso} was not formatted as ${expected} for CSV`));
+    assert(csvPackage.rows.slice(1).every(row => /^\d{2}-\d{2}-\d{4}$/.test(row[0])), "single-fortnight CSV contains a Date outside DD-MM-YYYY format");
+    assert(csvPackage.csv.includes(`"${csvPackage.rows[1][0]}"`), "single-fortnight serialized CSV does not contain its DD-MM-YYYY Date value");
+    const singleFortnightCsvBeforeMultiplePeriodTests = csvPackage.csv;
 
-    // Multi-period XLSX export uses complete intersecting fortnights, skips empty periods, and preserves the CSV schema.
+    // Multi-period CSV uses complete intersecting fortnights, skips empty periods, and preserves the existing CSV fields.
     const exportRecord = {...emptyRecord("Flextime"), startTime:"09:00", lunchOut:"12:00", lunchIn:"12:30", finishTime:"16:51"};
-    [["020826", "02 Aug 2026"], ["02 08 26", "02 Aug 2026"], ["02082026", "02 Aug 2026"], ["02 08 2026", "02 Aug 2026"], ["311226", "31 Dec 2026"], ["010127", "01 Jan 2027"], ["290224", "29 Feb 2024"]].forEach(([entered, expected]) => assert(parseWorkbookDate(entered)?.display === expected, `${entered} did not parse as ${expected}`));
-    ["290226", "310426", "31022026", "31 02 26", "32132026"].forEach(entered => assert(parseWorkbookDate(entered) === null, `${entered} was incorrectly accepted as a calendar date`));
+    [["020826", "02 Aug 2026"], ["02 08 26", "02 Aug 2026"], ["02082026", "02 Aug 2026"], ["02 08 2026", "02 Aug 2026"], ["311226", "31 Dec 2026"], ["010127", "01 Jan 2027"], ["290224", "29 Feb 2024"]].forEach(([entered, expected]) => assert(parseExportDate(entered)?.display === expected, `${entered} did not parse as ${expected}`));
+    ["290226", "310426", "31022026", "31 02 26", "32132026"].forEach(entered => assert(parseExportDate(entered) === null, `${entered} was incorrectly accepted as a calendar date`));
     input("exportPeriodFrom", "020826"); el("exportPeriodFrom").dispatchEvent(new Event("blur"));
     input("exportPeriodTo", "02082026"); el("exportPeriodTo").dispatchEvent(new Event("blur"));
     assert(el("exportPeriodFrom").value === "02 Aug 2026" && el("exportPeriodFromError").hidden && el("exportPeriodTo").value === "02 Aug 2026" && el("exportPeriodToError").hidden, "compact dates were rejected or not normalized by the actual Period From/To fields");
     state.records = {"2026-08-20":clone(exportRecord), "2026-09-03":clone(exportRecord), "2026-09-17":clone(exportRecord)};
     input("exportPeriodFrom", "20 08 2026"); el("exportPeriodFrom").dispatchEvent(new Event("blur"));
     input("exportPeriodTo", "02 09 2026"); el("exportPeriodTo").dispatchEvent(new Event("change"));
-    assert(el("exportPeriodFrom").value === "20 Aug 2026" && el("exportPeriodTo").value === "02 Sep 2026", "workbook dates were not normalized to DD MMM YYYY");
-    let workbook = exportWorkbook({download:() => {}});
-    assert(workbook.sheets.length === 1 && workbook.sheets[0].name === "20 Aug - 2 Sep" && workbook.filename.endsWith(".xlsx"), "one reporting period did not produce one correctly named workbook sheet");
-    assert(workbook.sheets[0].rows.length === csvPackage.rows.length && workbook.sheets[0].rows[0].join("|") === csvPackage.rows[0].join("|"), "workbook did not reuse the existing fortnight CSV schema");
+    assert(el("exportPeriodFrom").value === "20 Aug 2026" && el("exportPeriodTo").value === "02 Sep 2026", "multiple-period export dates were not normalized to DD MMM YYYY");
+    let combinedCsv = exportMultiplePeriodsCsv({download:() => {}});
+    assert(combinedCsv.periods.length === 1 && combinedCsv.filename === "Clocky_Timesheets_2026-08-20_to_2026-09-02.csv" && combinedCsv.blob.type === "text/csv;charset=utf-8", "one reporting period did not produce the expected CSV package");
+    assert(combinedCsv.rows[0][0] === "Reporting Period" && combinedCsv.rows[0].slice(1).join("|") === csvPackage.rows[0].join("|"), "Reporting Period is not the first column or existing CSV headers changed");
+    assert(combinedCsv.rows.slice(1).every(row => row[0] === "20-08-2026 to 02-09-2026"), "one-period data rows do not contain the correct reporting period");
+    assert(combinedCsv.rows.slice(1).every((row, index) => row.slice(1).join("|") === combinedCsv.periods[0].rows[index + 1].join("|")), "existing single-fortnight CSV field representations changed");
+    assert(!combinedCsv.rows.some(row => row.length === 0) && !combinedCsv.csv.includes("\r\n\r\n"), "one-period export contains an unnecessary blank row");
 
     input("exportPeriodFrom", "25 08 2026"); input("exportPeriodTo", "20 09 2026");
-    workbook = exportWorkbook({download:() => {}});
-    assert(workbook.sheets.map(sheet => sheet.name).join("|") === "20 Aug - 2 Sep|3 Sep - 16 Sep|17 Sep - 30 Sep", "mid-period From date or multiple reporting periods were selected incorrectly");
-    input("exportPeriodFrom", "20 08 2026"); input("exportPeriodTo", "05 09 2026"); workbook = exportWorkbook({download:() => {}});
-    assert(workbook.sheets.length === 2 && workbook.sheets.at(-1).name === "3 Sep - 16 Sep", "mid-period To date did not include the complete intersecting reporting period");
+    combinedCsv = exportMultiplePeriodsCsv({download:() => {}});
+    assert(combinedCsv.periods.map(period => period.start).join("|") === "2026-08-20|2026-09-03|2026-09-17", "mid-period From date or multiple reporting periods were selected incorrectly or are not chronological");
+    assert(combinedCsv.rows[0][0] === "Reporting Period" && combinedCsv.rows.filter(row => row[0] === "Reporting Period").length === 1, "combined CSV does not contain exactly one header at the top");
+    const combinedLines = combinedCsv.csv.split("\r\n"), blankLineIndexes = combinedLines.map((line, index) => line === "" ? index : -1).filter(index => index >= 0);
+    assert(blankLineIndexes.join("|") === "15|30", "combined CSV does not contain exactly one genuinely empty line between reporting periods");
+    assert(combinedLines[0] !== "" && combinedLines.at(-1) !== "", "combined CSV contains a blank line before the first or after the final period");
+    assert(reportingPeriodLabel("2026-08-06", "2026-08-19") === "06-08-2026 to 19-08-2026", "reporting period was not formatted as DD-MM-YYYY to DD-MM-YYYY");
+    assert(combinedCsv.rows.filter(row => row.length).slice(1).every(row => /^\d{2}-\d{2}-\d{4} to \d{2}-\d{2}-\d{4}$/.test(row[0]) && /^\d{2}-\d{2}-\d{4}$/.test(row[1])), "a combined CSV row has an invalid reporting-period or Date format");
+    combinedCsv.periods.forEach(period => {
+      const label = reportingPeriodLabel(period.start, period.end), exportedRows = combinedCsv.rows.filter(row => row[0] === label);
+      assert(exportedRows.length === period.rows.length - 1 && exportedRows.every((row, index) => row.slice(1).join("|") === period.rows[index + 1].join("|")), `CSV representations or chronological row order changed for ${label}`);
+    });
+    input("exportPeriodFrom", "20 08 2026"); input("exportPeriodTo", "05 09 2026"); combinedCsv = exportMultiplePeriodsCsv({download:() => {}});
+    assert(combinedCsv.periods.length === 2 && combinedCsv.periods.at(-1).start === "2026-09-03", "mid-period To date did not include the complete intersecting reporting period");
     delete state.records["2026-09-03"];
-    input("exportPeriodFrom", "20 08 2026"); input("exportPeriodTo", "20 09 2026"); workbook = exportWorkbook({download:() => {}});
-    assert(workbook.sheets.map(sheet => sheet.name).join("|") === "20 Aug - 2 Sep|17 Sep - 30 Sep", "empty reporting periods were not skipped");
-    assert(workbook.blob.type === "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" && workbook.files.some(file => file.name === "xl/workbook.xml"), "export did not build a valid XLSX package structure");
-    const workbookBytes = new Uint8Array(await workbook.blob.arrayBuffer()), workbookView = new DataView(workbookBytes.buffer, workbookBytes.byteOffset, workbookBytes.byteLength);
-    const eocdOffset = workbookBytes.length - 22;
-    assert(workbookView.getUint32(eocdOffset, true) === 0x06054b50, "XLSX ZIP end-of-central-directory signature is missing");
-    const centralEntryCount = workbookView.getUint16(eocdOffset + 10, true), centralSize = workbookView.getUint32(eocdOffset + 12, true), centralOffset = workbookView.getUint32(eocdOffset + 16, true);
-    assert(centralEntryCount === workbook.files.length, "XLSX ZIP central-directory entry count is incorrect");
-    let centralCursor = centralOffset;
-    for (let entry = 0; entry < centralEntryCount; entry++) {
-      assert(workbookView.getUint32(centralCursor, true) === 0x02014b50, `XLSX ZIP central entry ${entry + 1} has an invalid signature`);
-      const nameLength = workbookView.getUint16(centralCursor + 28, true), extraLength = workbookView.getUint16(centralCursor + 30, true), commentLength = workbookView.getUint16(centralCursor + 32, true), localOffset = workbookView.getUint32(centralCursor + 42, true);
-      assert(workbookView.getUint32(localOffset, true) === 0x04034b50, `XLSX ZIP central entry ${entry + 1} points to an invalid local header`);
-      centralCursor += 46 + nameLength + extraLength + commentLength;
-    }
-    assert(centralCursor === centralOffset + centralSize && centralCursor === eocdOffset, "XLSX ZIP central-directory size or offset is inconsistent");
+    input("exportPeriodFrom", "20 08 2026"); input("exportPeriodTo", "20 09 2026"); combinedCsv = exportMultiplePeriodsCsv({download:() => {}});
+    assert(combinedCsv.periods.map(period => period.start).join("|") === "2026-08-20|2026-09-17" && combinedCsv.rows.filter(row => row.length === 0).length === 1, "empty reporting periods were not skipped or separator count is incorrect");
 
     input("exportPeriodFrom", "31 02 2026"); input("exportPeriodTo", "20 09 2026");
-    assert(exportWorkbook({download:() => {}}) === "invalid" && !el("exportPeriodFromError").hidden, "invalid From date was not rejected inline");
+    assert(exportMultiplePeriodsCsv({download:() => {}}) === "invalid" && !el("exportPeriodFromError").hidden, "invalid From date was not rejected inline");
     input("exportPeriodFrom", "20 08 2026"); input("exportPeriodTo", "not a date");
-    assert(exportWorkbook({download:() => {}}) === "invalid" && !el("exportPeriodToError").hidden, "invalid To date was not rejected inline");
+    assert(exportMultiplePeriodsCsv({download:() => {}}) === "invalid" && !el("exportPeriodToError").hidden, "invalid To date was not rejected inline");
     input("exportPeriodFrom", "20 09 2026"); input("exportPeriodTo", "20 08 2026");
-    assert(exportWorkbook({download:() => {}}) === "invalid-range" && el("exportPeriodToError").textContent === "Period To cannot be earlier than Period From.", "To earlier than From was not rejected inline");
+    assert(exportMultiplePeriodsCsv({download:() => {}}) === "invalid-range" && el("exportPeriodToError").textContent === "Period To cannot be earlier than Period From.", "To earlier than From was not rejected inline");
     state.records = {}; input("exportPeriodFrom", "20 08 2026"); input("exportPeriodTo", "20 09 2026");
-    assert(exportWorkbook({download:() => {}}) === "empty" && el("workbookExportStatus").textContent === "No timesheet records found for this period.", "record-free range did not suppress download and show the required message");
-    assert(buildCsvPackage(viewStart).csv === csvBeforeWorkbookTests, "existing single-fortnight CSV export changed after workbook export");
+    assert(exportMultiplePeriodsCsv({download:() => {}}) === "empty" && el("multiplePeriodExportStatus").textContent === "No timesheet records found for this period.", "record-free range did not suppress download and show the required message");
+    assert(buildCsvPackage(viewStart).csv === singleFortnightCsvBeforeMultiplePeriodTests, "existing single-fortnight CSV export changed after multiple-period export");
 
     openEmailModal(); input("emailTo", "not-an-email");
     assert(await sendEmailCsv({ navigator:{} }) === "invalid" && !el("emailToError").hidden, "invalid email was not rejected inline");

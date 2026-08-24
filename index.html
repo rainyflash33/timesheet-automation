@@ -11,7 +11,7 @@
   <link rel="manifest" href="manifest.webmanifest?v=clocky-icon-v2">
   <link rel="icon" type="image/png" sizes="192x192" href="assets/icons/clocky-icon-192.png?v=clocky-icon-v2">
   <link rel="apple-touch-icon" sizes="180x180" href="assets/icons/clocky-apple-touch-icon-180.png?v=clocky-icon-v2">
-  <link rel="stylesheet" href="styles.css?v=collapsed-sections-v1">
+  <link rel="stylesheet" href="styles.css?v=combined-csv-v1">
 </head>
 <body>
   <main>
@@ -116,9 +116,9 @@
           <div class="multi-period-fields">
             <label>Period From <input id="exportPeriodFrom" type="text" inputmode="numeric" autocomplete="off" placeholder="DD MM YYYY" aria-describedby="exportPeriodFromError"><span id="exportPeriodFromError" class="field-error" role="alert" hidden>Enter a valid date in DD MM YYYY format.</span></label>
             <label>Period To <input id="exportPeriodTo" type="text" inputmode="numeric" autocomplete="off" placeholder="DD MM YYYY" aria-describedby="exportPeriodToError"><span id="exportPeriodToError" class="field-error" role="alert" hidden>Enter a valid date in DD MM YYYY format.</span></label>
-            <button id="exportWorkbook" class="secondary" type="button">Export</button>
+            <button id="exportMultiplePeriods" class="secondary" type="button">Export</button>
           </div>
-          <p id="workbookExportStatus" class="inline-status" role="status" aria-live="polite"></p>
+          <p id="multiplePeriodExportStatus" class="inline-status" role="status" aria-live="polite"></p>
         </div>
       </div>
     </section>
@@ -245,7 +245,7 @@
     </section>
   </div>
   <script src="calculator.js"></script>
-  <script src="app.js?v=collapsed-sections-v1"></script>
+  <script src="app.js?v=csv-date-format-v1"></script>
   <script src="pwa-register.js?v=install-clocky-v1"></script>
 </body>
 </html>
