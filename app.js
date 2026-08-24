@@ -22,6 +22,8 @@ let interruptionEditorSequence = 0;
 let originalLeaveToil = null;
 let editMode = false;
 let pendingRecordSubmission = null;
+let pendingWeekendRecordOpen = null;
+let pendingPreviousRecord = null;
 
 function clone(value) { return JSON.parse(JSON.stringify(value)); }
 function el(id) { return document.getElementById(id); }
@@ -47,6 +49,28 @@ function formatDisplayDate(iso, style = "history") {
   if (style === "range") return `${Number(day)} ${months[Number(month) - 1]} ${year}`;
   return `${day}-${month}-${year} ${weekdays[date.getUTCDay()]}`;
 }
+function formatRecordDate(iso) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso || "");
+  if (!match) return "";
+  const [, year, month, day] = match;
+  const localDate = new Date(Number(year), Number(month) - 1, Number(day));
+  const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const weekdays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  return `${day} ${months[Number(month) - 1]} ${year} ${weekdays[localDate.getDay()]}`;
+}
+function formatReminderDate(iso) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso || "");
+  if (!match) return iso || "";
+  const [, year, month, day] = match;
+  return `${day} ${["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][Number(month) - 1]} ${year}`;
+}
+function renderRecordDate() { el("recordDateDisplay").textContent = formatRecordDate(el("recordDate").value); }
+function weekdayForISO(iso) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso || "");
+  if (!match) return null;
+  return new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3])).getDay();
+}
+function isWeekendISO(iso) { const weekday = weekdayForISO(iso); return weekday === 0 || weekday === 6; }
 function updateLeaveTypeOptions() {
   const current = el("leaveType").value;
   const seniorOfficer = C.isSeniorOfficer(draft.attendanceType);
@@ -97,17 +121,28 @@ function buildUI() {
     input.addEventListener("change", () => { formatDurationInput(input, true); if (input.dataset.recordDuration != null) updateDraft(); });
   });
   el("leaveType").addEventListener("change", () => {
-    if (el("leaveType").value === "Public Holiday" && !el("leaveHours").value) el("leaveHours").value = state.settings.standardByDay[new Date(`${activeDate}T00:00:00`).getDay()];
+    if (el("leaveType").value === "Public Holiday" && !el("leaveHours").value) el("leaveHours").value = state.settings.standardByDay[weekdayForISO(activeDate)];
     updateDraft();
   });
-  el("recordDate").addEventListener("change", () => changeRecord(el("recordDate").value));
+  el("recordDate").addEventListener("change", () => { changeRecord(el("recordDate").value); renderRecordDate(); });
   el("viewFortnight").addEventListener("change", () => changeFortnight(el("viewFortnight").value));
   el("filterYear").addEventListener("change", () => changePeriodFilter(Number(el("filterYear").value), filterMonth));
   el("filterMonth").addEventListener("change", () => changePeriodFilter(filterYear, Number(el("filterMonth").value)));
+  el("exportSelectedFortnight").addEventListener("click", () => exportCsv(viewStart));
+  ["exportPeriodFrom", "exportPeriodTo"].forEach(id => {
+    el(id).addEventListener("input", () => clearWorkbookDateError(id));
+    el(id).addEventListener("change", () => normalizeWorkbookDateField(id));
+    el(id).addEventListener("blur", () => normalizeWorkbookDateField(id));
+  });
+  el("exportWorkbook").addEventListener("click", () => exportWorkbook());
   el("toggleInterruptions").addEventListener("click", () => openInterruptionEditor());
   el("submitRecord").addEventListener("click", submitRecord);
   el("saveDraft").addEventListener("click", saveDraft);
+  el("copyPrevious").addEventListener("click", copyPrevious);
   el("clearRecord").addEventListener("click", clearRecordForm);
+  el("cancelCopyPrevious").addEventListener("click", closeCopyPreviousModal);
+  el("confirmCopyPrevious").addEventListener("click", confirmCopyPrevious);
+  el("copyPreviousModal").addEventListener("click", event => { if (event.target === el("copyPreviousModal")) closeCopyPreviousModal(); });
   el("toggleLeaveToil").addEventListener("click", () => setLeaveToilExpanded(el("leaveToilPanel").hidden));
   el("cancelLeaveToil").addEventListener("click", cancelLeaveToil);
   el("cancelEdit").addEventListener("click", cancelEdit);
@@ -124,6 +159,13 @@ function buildUI() {
       setSettingsExpanded(el("settingsContent").hidden);
     }
   });
+  el("historicalToggle").addEventListener("click", () => setHistoricalExpanded(el("historicalContent").hidden));
+  el("historicalToggle").addEventListener("keydown", event => {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      setHistoricalExpanded(el("historicalContent").hidden);
+    }
+  });
   ["input", "change"].forEach(eventName => el("fortnightStart").addEventListener(eventName, () => { updateConfigurationValidity(); renderAll(); }));
   el("exportCsv").addEventListener("click", () => exportCsv());
   el("emailCsv").addEventListener("click", openEmailModal);
@@ -134,7 +176,7 @@ function buildUI() {
   el("emailTo").addEventListener("input", () => { el("emailToError").hidden = true; el("emailTo").removeAttribute("aria-invalid"); });
   el("closeWelcome").addEventListener("click", closeWelcomeModal);
   el("confirmSpecialWork").addEventListener("click", confirmPendingRecordSubmission);
-  el("cancelSpecialWork").addEventListener("click", closeWorkConfirmation);
+  el("cancelSpecialWork").addEventListener("click", cancelPendingWorkConfirmation);
   el("openFeedback").addEventListener("click", openFeedbackModal);
   el("closeFeedback").addEventListener("click", closeFeedbackModal);
   el("cancelFeedback").addEventListener("click", closeFeedbackModal);
@@ -232,6 +274,47 @@ function clearRecordForm() {
   setLeaveToilExpanded(false);
   renderCurrentPreview();
   updateActionState();
+}
+
+function previousSavedRecord(date) {
+  const dates = [...new Set([...Object.keys(state.records), ...Object.keys(state.drafts)])].filter(candidate => candidate < date).sort();
+  const previousDate = dates.at(-1);
+  if (!previousDate) return null;
+  const saved = state.records[previousDate] || state.drafts[previousDate]?.record;
+  return saved ? { date:previousDate, record:clone(saved) } : null;
+}
+function currentEntryHasData() {
+  const current = readForm();
+  return RECORD_FIELDS.some(key => key !== "attendanceType" && Boolean(current[key])) || [...document.querySelectorAll("[data-interruption-time]")].some(input => input.value);
+}
+function copyPrevious() {
+  const previous = previousSavedRecord(activeDate);
+  if (!previous) { showStatus("No previous entry available to copy."); return; }
+  if (currentEntryHasData()) {
+    pendingPreviousRecord = previous;
+    el("copyPreviousModal").hidden = false;
+    el("confirmCopyPrevious").focus();
+    return;
+  }
+  applyPreviousRecord(previous.record);
+}
+function applyPreviousRecord(record) {
+  const copied = emptyRecord(state.settings.attendanceType);
+  RECORD_FIELDS.forEach(key => { copied[key] = record[key] || (key === "attendanceType" ? state.settings.attendanceType : ""); });
+  draft = copied;
+  fillForm(draft);
+  closeInterruptionEditor();
+  renderInterruptionList();
+  setLeaveToilExpanded(recordHasLeaveToil(draft));
+  renderCurrentPreview();
+  updateActionState();
+}
+function closeCopyPreviousModal() { pendingPreviousRecord = null; el("copyPreviousModal").hidden = true; }
+function confirmCopyPrevious() {
+  if (!pendingPreviousRecord) return closeCopyPreviousModal();
+  const record = pendingPreviousRecord.record;
+  closeCopyPreviousModal();
+  applyPreviousRecord(record);
 }
 
 function removeSavedDraft(date) {
@@ -402,12 +485,24 @@ function changeFortnight(start) {
 
 function changeRecord(date) {
   if (!date || (viewStart && (date < viewStart || date > C.addDays(viewStart, 13)))) { alert("Choose a Record date within the fortnight currently being viewed."); el("recordDate").value = activeDate; return; }
-  if (draftIsDirty() && !confirm("Discard your unsaved changes and open another record?")) { el("recordDate").value = activeDate; return; }
-  loadRecord(date, true);
+  if (date === activeDate) return;
+  if (!requestRecordOpen(date)) { el("recordDate").value = activeDate; renderRecordDate(); }
+}
+function requestRecordOpen(date, mode = "new") {
+  if (draftIsDirty() && !confirm("Discard your unsaved changes and open another record?")) return false;
+  if (isWeekendISO(date)) {
+    pendingWeekendRecordOpen = { date, mode };
+    openWorkConfirmation({
+      title:"Please confirm this weekend entry",
+      message:"You have selected a Saturday or Sunday. Are you sure you want to enter a timesheet for this weekend day?"
+    });
+    return true;
+  }
+  return loadRecord(date, true, mode);
 }
 function loadRecord(date, force = false, mode = "new") {
   if (!force && draftIsDirty() && !confirm("Discard your unsaved changes and open another record?")) return;
-  activeDate = date; el("recordDate").value = date;
+  activeDate = date; el("recordDate").value = date; renderRecordDate();
   const savedDraft = mode === "new" ? state.drafts[date] : null;
   editMode = mode === "edit" || Boolean(savedDraft?.editMode && state.records[date]);
   draft = savedDraft ? clone(savedDraft.record) : editMode ? clone(state.records[date]) : emptyRecord(state.settings.attendanceType); originalDraft = clone(draft);
@@ -451,6 +546,7 @@ function commitRecordSubmission(submission) {
   const { date, candidateRecord, previous, existed, wasEditMode } = submission;
   const previousDraft = state.drafts[date] ? clone(state.drafts[date]) : null;
   const previousActiveDraftDate = state.activeDraftDate;
+  const previousSubmissions = clone(state.submissions);
   state.records[date] = clone(candidateRecord);
   removeSavedDraft(date);
   const submittedChanged = !recordsEqual(previous, candidateRecord) && flagSubmittedChange(date);
@@ -458,6 +554,7 @@ function commitRecordSubmission(submission) {
     if (previous) state.records[date] = previous; else delete state.records[date];
     if (previousDraft) state.drafts[date] = previousDraft;
     state.activeDraftDate = previousActiveDraftDate;
+    state.submissions = previousSubmissions;
     return;
   }
   if (!wasEditMode && !existed) advanceToNextAvailableRecordDate(date);
@@ -468,8 +565,7 @@ function commitRecordSubmission(submission) {
   if (submittedChanged) alert("This fortnight was previously submitted. The saved record has changed and the fortnight may need to be resubmitted.");
 }
 function guardWeekendSubmission(date, candidateRecord, submission) {
-  const weekday = new Date(`${date}T00:00:00`).getDay();
-  if ((weekday !== 0 && weekday !== 6) || !hasMeaningfulTimesheetData(candidateRecord)) return true;
+  if (!isWeekendISO(date) || !hasMeaningfulTimesheetData(candidateRecord)) return true;
   const publicHoliday = candidateRecord.leaveType === "Public Holiday";
   queueRecordConfirmation(submission, publicHoliday ? {
     title:"Please confirm this timesheet entry",
@@ -481,8 +577,7 @@ function guardWeekendSubmission(date, candidateRecord, submission) {
   return false;
 }
 function workConfirmationFor(date, record) {
-  const weekday = new Date(`${date}T00:00:00`).getDay();
-  const weekend = weekday === 0 || weekday === 6;
+  const weekend = isWeekendISO(date);
   const publicHoliday = record.leaveType === "Public Holiday";
   const publicHolidayAdditionalEntry = hasMeaningfulTimesheetData(record, true);
   if (weekend || !publicHoliday || !publicHolidayAdditionalEntry) return null;
@@ -503,6 +598,12 @@ function queueRecordConfirmation(submission, details) {
   openWorkConfirmation(details);
 }
 function confirmPendingRecordSubmission() {
+  if (pendingWeekendRecordOpen) {
+    const pending = pendingWeekendRecordOpen;
+    closeWorkConfirmation();
+    loadRecord(pending.date, true, pending.mode);
+    return;
+  }
   const submission = pendingRecordSubmission;
   if (!submission) return;
   closeWorkConfirmation();
@@ -516,8 +617,14 @@ function openWorkConfirmation(details) {
 }
 function closeWorkConfirmation() {
   pendingRecordSubmission = null;
+  pendingWeekendRecordOpen = null;
   el("workConfirmationModal").hidden = true;
   el("submitRecord").focus();
+}
+function cancelPendingWorkConfirmation() {
+  const cancelledRecordOpen = Boolean(pendingWeekendRecordOpen);
+  closeWorkConfirmation();
+  if (cancelledRecordOpen) { el("recordDate").value = activeDate; renderRecordDate(); }
 }
 function cancelEdit() {
   if (!editMode) return;
@@ -555,9 +662,10 @@ function deleteRecord(date) {
   const currentDirty = date === activeDate && draftIsDirty();
   const message = currentDirty ? `Delete ${date} and discard its unsaved changes? This cannot be undone.` : `Delete the record for ${date}? This cannot be undone.`;
   if (!confirm(message)) return;
+  const previousSubmissions = clone(state.submissions);
   const submittedChanged = flagSubmittedChange(date);
   const deleted = state.records[date]; delete state.records[date];
-  if (!save()) { state.records[date] = deleted; return; }
+  if (!save()) { state.records[date] = deleted; state.submissions = previousSubmissions; return; }
   if (date === activeDate) { editMode = false; draft = emptyRecord(state.settings.attendanceType); originalDraft = clone(draft); fillForm(draft); closeInterruptionEditor(); renderInterruptionList(); setLeaveToilExpanded(false); }
   renderAll(); showStatus("Record deleted. Later balances have been recalculated.");
   if (submittedChanged) alert("This fortnight was previously submitted. A record was deleted and the fortnight may need to be resubmitted.");
@@ -567,7 +675,7 @@ function flagSubmittedChange(date) {
   if (!validAnchor()) return false;
   const start = C.fortnightFor(date, state.settings.fortnightStart).start;
   const submission = state.submissions[start];
-  if (!submission?.submitted) return false;
+  if (!submission?.submitted || submission.changed) return false;
   submission.changed = true;
   return true;
 }
@@ -651,7 +759,7 @@ function renderRecords(calc) {
   const end = viewStart ? C.addDays(viewStart, 13) : "";
   const dates = Object.keys(state.records).filter(date => viewStart && date >= viewStart && date <= end).sort();
   el("recordsBody").innerHTML = dates.length ? dates.map(date => { const d = calc[date], senior = C.isSeniorOfficer(state.records[date].attendanceType); return `<tr><td>${formatDisplayDate(date)}</td><td>${d ? C.formatDuration(d.daily) || "Incomplete" : "—"}</td><td>${d ? C.formatDuration(senior ? d.dailySog : d.dailyFlex) || "—" : "—"}</td><td>${d ? C.formatDuration(senior ? d.progressiveSog : d.progressiveFlex) : "—"}</td><td>${d ? C.formatDuration(d.progressiveToil) : "—"}</td><td class="row-actions"><button class="link-button" data-edit="${date}">Edit</button><button class="link-button danger" data-delete="${date}">Delete</button></td></tr>`; }).join("") : `<tr><td colspan="6" class="muted">No records yet.</td></tr>`;
-  document.querySelectorAll("[data-edit]").forEach(button => button.addEventListener("click", () => { if (loadRecord(button.dataset.edit, false, "edit")) scrollTo({top:0, behavior:"smooth"}); }));
+  document.querySelectorAll("[data-edit]").forEach(button => button.addEventListener("click", () => { if (requestRecordOpen(button.dataset.edit, "edit")) scrollTo({top:0, behavior:"smooth"}); }));
   document.querySelectorAll("[data-delete]").forEach(button => button.addEventListener("click", () => deleteRecord(button.dataset.delete)));
 }
 
@@ -692,7 +800,7 @@ function renderSubmissionReminder() {
   if (period.submission.changed) el("submissionMessage").textContent = "Submitted fortnight changed — please review and resubmit if needed.";
   else if (today === period.end) el("submissionMessage").textContent = "Timesheet due — please review and submit this fortnight.";
   else el("submissionMessage").textContent = "Timesheet overdue — please review and submit this fortnight.";
-  el("submissionPeriod").textContent = `${period.start} to ${period.end}`;
+  el("submissionPeriod").textContent = `${formatReminderDate(period.start)} to ${formatReminderDate(period.end)}`;
 }
 
 function markFortnightSubmitted() {
@@ -700,7 +808,6 @@ function markFortnightSubmitted() {
   const submittedStart = reminderStart;
   state.submissions[submittedStart] = { submitted: true, changed: false, submittedAt: new Date().toISOString() };
   save(); renderAll(); showStatus("Fortnight marked as submitted.");
-  if (confirm("Timesheet submitted. Would you like to export a backup CSV?")) exportCsv(submittedStart);
 }
 
 function renderSettings() {
@@ -717,6 +824,13 @@ function setSettingsExpanded(expanded) {
   el("settingsToggleButton").textContent = expanded ? "−" : "+";
   el("settingsToggleButton").setAttribute("aria-label", expanded ? "Collapse Settings" : "Expand Settings");
   document.querySelector(".settings").classList.toggle("settings-collapsed", !expanded);
+}
+function setHistoricalExpanded(expanded) {
+  el("historicalContent").hidden = !expanded;
+  el("historicalToggle").setAttribute("aria-expanded", String(expanded));
+  el("historicalToggleButton").textContent = expanded ? "−" : "+";
+  el("historicalToggleButton").setAttribute("aria-label", expanded ? "Collapse Historical Timesheets" : "Expand Historical Timesheets");
+  document.querySelector(".historical-timesheets").classList.toggle("section-collapsed", !expanded);
 }
 function updateConfigurationValidity() {
   const selectedValid = selectedAnchorValid();
@@ -795,6 +909,111 @@ function exportCsv(start = viewStart) {
   if (!ensureValidAnchor()) return;
   downloadCsvPackage(buildCsvPackage(start));
 }
+function parseWorkbookDate(value) {
+  const raw = String(value || "").trim().replace(/\s+/g, " ");
+  const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  let match = /^(\d{1,2})\s+(\d{1,2})\s+(\d{2}|\d{4})$/.exec(raw);
+  if (!match && /^\d{6}$/.test(raw)) match = [raw, raw.slice(0, 2), raw.slice(2, 4), raw.slice(4, 6)];
+  if (!match && /^\d{8}$/.test(raw)) match = [raw, raw.slice(0, 2), raw.slice(2, 4), raw.slice(4, 8)];
+  if (!match) {
+    const named = /^(\d{1,2})\s+([A-Za-z]{3})\s+(\d{4})$/.exec(raw);
+    if (named) {
+      const monthIndex = months.findIndex(month => month.toLowerCase() === named[2].toLowerCase());
+      if (monthIndex >= 0) match = [named[0], named[1], String(monthIndex + 1), named[3]];
+    }
+  }
+  if (!match) return null;
+  const day = Number(match[1]), month = Number(match[2]), enteredYear = Number(match[3]), year = match[3].length === 2 ? 2000 + enteredYear : enteredYear;
+  const date = new Date(year, month - 1, day);
+  if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day) return null;
+  const iso = `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+  return { iso, display:`${String(day).padStart(2, "0")} ${months[month - 1]} ${year}` };
+}
+function clearWorkbookDateError(id) {
+  el(`${id}Error`).hidden = true;
+  el(`${id}Error`).textContent = "Enter a valid date in DD MM YYYY format.";
+  el(id).removeAttribute("aria-invalid");
+  el("workbookExportStatus").textContent = "";
+  el("workbookExportStatus").classList.remove("error");
+}
+function normalizeWorkbookDateField(id) {
+  const input = el(id);
+  if (!input.value.trim()) { clearWorkbookDateError(id); return null; }
+  const parsed = parseWorkbookDate(input.value);
+  el(`${id}Error`).hidden = Boolean(parsed);
+  input.setAttribute("aria-invalid", String(!parsed));
+  if (parsed) input.value = parsed.display;
+  return parsed;
+}
+function workbookPeriods(from, to) {
+  const periods = [];
+  for (let start = periodFor(from).start; start <= to; start = C.addDays(start, 14)) {
+    const end = C.addDays(start, 13);
+    if (Object.keys(state.records).some(date => date >= start && date <= end)) periods.push({ start, end, rows:buildCsvPackage(start).rows });
+  }
+  return periods;
+}
+function workbookSheetName(start, end) {
+  const short = iso => { const [year, month, day] = iso.split("-").map(Number); return `${day} ${["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][month - 1]}`; };
+  return `${short(start)} - ${short(end)}`.slice(0, 31);
+}
+function xmlEscape(value) { return String(value ?? "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&apos;"); }
+function worksheetXml(rows) {
+  const columnName = index => { let name = ""; for (let value = index + 1; value; value = Math.floor((value - 1) / 26)) name = String.fromCharCode(65 + (value - 1) % 26) + name; return name; };
+  const body = rows.map((row, rowIndex) => `<row r="${rowIndex + 1}">${row.map((value, columnIndex) => `<c r="${columnName(columnIndex)}${rowIndex + 1}" t="inlineStr"><is><t xml:space="preserve">${xmlEscape(value)}</t></is></c>`).join("")}</row>`).join("");
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>${body}</sheetData></worksheet>`;
+}
+function crc32(bytes) {
+  let crc = 0xffffffff;
+  for (const byte of bytes) { crc ^= byte; for (let bit = 0; bit < 8; bit++) crc = (crc >>> 1) ^ (0xedb88320 & -(crc & 1)); }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+function zipStored(files) {
+  const encoder = new TextEncoder(), chunks = [], central = []; let offset = 0;
+  const uint16 = value => [value & 255, value >>> 8 & 255];
+  const uint32 = value => [value & 255, value >>> 8 & 255, value >>> 16 & 255, value >>> 24 & 255];
+  files.forEach(file => {
+    const name = encoder.encode(file.name), data = encoder.encode(file.content), crc = crc32(data);
+    const local = new Uint8Array([0x50,0x4b,0x03,0x04,...uint16(20),0,0,0,0,0,0,0,0,...uint32(crc),...uint32(data.length),...uint32(data.length),...uint16(name.length),0,0,...name]);
+    chunks.push(local, data);
+    central.push(new Uint8Array([0x50,0x4b,0x01,0x02,...uint16(20),...uint16(20),0,0,0,0,0,0,0,0,...uint32(crc),...uint32(data.length),...uint32(data.length),...uint16(name.length),0,0,0,0,0,0,0,0,0,0,0,0,...uint32(offset),...name]));
+    offset += local.length + data.length;
+  });
+  const centralSize = central.reduce((sum, part) => sum + part.length, 0), count = files.length;
+  return new Blob([...chunks, ...central, new Uint8Array([0x50,0x4b,0x05,0x06,0,0,0,0,...uint16(count),...uint16(count),...uint32(centralSize),...uint32(offset),0,0])], {type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"});
+}
+function buildWorkbookPackage(periods, from, to) {
+  const sheets = periods.map(period => ({ ...period, name:workbookSheetName(period.start, period.end) }));
+  const contentTypes = sheets.map((_, index) => `<Override PartName="/xl/worksheets/sheet${index + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`).join("");
+  const workbookSheets = sheets.map((sheet, index) => `<sheet name="${xmlEscape(sheet.name)}" sheetId="${index + 1}" r:id="rId${index + 1}"/>`).join("");
+  const relationships = sheets.map((_, index) => `<Relationship Id="rId${index + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${index + 1}.xml"/>`).join("");
+  const files = [
+    {name:"[Content_Types].xml", content:`<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>${contentTypes}</Types>`},
+    {name:"_rels/.rels", content:`<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>`},
+    {name:"xl/workbook.xml", content:`<?xml version="1.0" encoding="UTF-8"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>${workbookSheets}</sheets></workbook>`},
+    {name:"xl/_rels/workbook.xml.rels", content:`<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${relationships}</Relationships>`},
+    ...sheets.map((sheet, index) => ({name:`xl/worksheets/sheet${index + 1}.xml`, content:worksheetXml(sheet.rows)}))
+  ];
+  const filename = `Clocky_Timesheets_${from}_to_${to}.xlsx`;
+  return { blob:zipStored(files), filename, sheets, files };
+}
+function downloadWorkbookPackage(workbook) {
+  const link = document.createElement("a"); link.href = URL.createObjectURL(workbook.blob); link.download = workbook.filename; link.click();
+  setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+}
+function exportWorkbook(options = {}) {
+  if (!ensureValidAnchor()) return "invalid";
+  const from = normalizeWorkbookDateField("exportPeriodFrom"), to = normalizeWorkbookDateField("exportPeriodTo");
+  if (!from || !to) { el("workbookExportStatus").textContent = "Enter valid From and To dates."; el("workbookExportStatus").classList.add("error"); return "invalid"; }
+  if (to.iso < from.iso) { el("exportPeriodToError").textContent = "Period To cannot be earlier than Period From."; el("exportPeriodToError").hidden = false; el("exportPeriodTo").setAttribute("aria-invalid", "true"); return "invalid-range"; }
+  el("exportPeriodToError").textContent = "Enter a valid date in DD MM YYYY format.";
+  const periods = workbookPeriods(from.iso, to.iso);
+  if (!periods.length) { el("workbookExportStatus").textContent = "No timesheet records found for this period."; el("workbookExportStatus").classList.add("error"); return "empty"; }
+  const workbook = buildWorkbookPackage(periods, from.iso, to.iso);
+  (options.download || downloadWorkbookPackage)(workbook);
+  el("workbookExportStatus").textContent = `${periods.length} reporting period${periods.length === 1 ? "" : "s"} exported.`; el("workbookExportStatus").classList.remove("error");
+  return workbook;
+}
 function emailIsValid(value) { return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim()); }
 function openEmailModal() {
   if (!ensureValidAnchor()) return;
@@ -860,7 +1079,7 @@ function prepareFeedback(options = {}) {
   return "opened";
 }
 
-buildUI(); renderSettings();
+buildUI(); renderSettings(); setSettingsExpanded(false); setHistoricalExpanded(false);
 if (validAnchor()) viewStart = periodFor(activeDate).start;
 loadRecord(activeDate, true);
 openWelcomeModal();

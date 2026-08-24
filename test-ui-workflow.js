@@ -24,12 +24,22 @@
     localStorage.removeItem(STORAGE_KEY);
     state = clone(defaults); activeDate = "2026-08-21"; viewStart = ""; editMode = false;
     renderSettings(); loadRecord(activeDate, true);
+    assert(el("settingsContent").hidden && el("settingsToggle").getAttribute("aria-expanded") === "false" && el("settingsToggleButton").textContent === "+", "Settings did not start collapsed");
+    assert(el("historicalContent").hidden && el("historicalToggle").getAttribute("aria-expanded") === "false" && el("historicalToggleButton").textContent === "+", "Historical Timesheets did not start collapsed");
+    el("historicalToggle").click();
+    assert(!el("historicalContent").hidden && el("historicalToggle").getAttribute("aria-expanded") === "true" && el("historicalToggleButton").textContent === "−", "Historical Timesheets did not expand normally");
+    el("historicalToggle").click();
+    assert(el("historicalContent").hidden, "Historical Timesheets did not collapse normally");
     assert(el("leaveToilPanel").hidden && el("toggleLeaveToil").getAttribute("aria-expanded") === "false", "new-record Leave / TOIL panel did not start collapsed");
     assert(!el("attendanceType") && el("attendanceTypeSetting").value === "Flextime", "Attendance Type was not moved from the daily form into Settings");
     assert([...document.querySelector(".settings .form-grid").querySelectorAll("label")].slice(0, 4).map(label => label.childNodes[0].textContent.trim()).join("|") === "Attendance Type|Fortnight start date|Opening Flex Balance|Opening TOIL Balance", "Settings fields are not in the required order");
     assert(el("dailyBalanceHeading").textContent === "Daily Flex" && el("progressiveBalanceHeading").textContent === "Progressive Flex", "Flextime history headings are incorrect");
     assert(!document.querySelector(".danger-zone h3") && document.querySelector(".danger-zone-title").textContent === "Delete All Saved Timesheet Records", "reset section cosmetic title is incorrect");
     assert(getComputedStyle(document.querySelector(".danger-zone")).borderTopStyle !== "none", "reset section divider was removed");
+    assert(document.querySelector('script[src="app.js?v=collapsed-sections-v1"]'), "page is not loading the cache-busted collapsed-sections application bundle");
+    assert([...document.querySelector(".history-filters").children].map(control => control.tagName === "LABEL" ? control.childNodes[0].textContent.trim() : control.textContent.trim()).join("|") === "Year|Month|Fortnight|Export", "Historical Timesheets controls are not ordered Year, Month, Fortnight, Export");
+    assert(el("exportSelectedFortnight").classList.contains("secondary") && el("exportWorkbook").classList.contains("secondary") && el("exportWorkbook").textContent === "Export", "Historical Timesheets export actions do not share the secondary utility style or wording");
+    assert(getComputedStyle(document.querySelector(".multi-period-export")).borderTopStyle === "none" && getComputedStyle(document.querySelector(".multi-period-export h3")).color === "rgb(81, 74, 92)", "Export Multiple Periods heading or divider styling is incorrect");
 
     assert(!el("welcomeModal").hidden, "welcome disclaimer did not open on page load");
     assert(el("welcomeModal").textContent.includes("Clocky is for personal use only.") && el("welcomeModal").textContent.includes("Please do not enter any confidential, sensitive, or work-related information."), "welcome disclaimer text is incorrect");
@@ -38,6 +48,8 @@
     el("closeWelcome").click(); assert(el("welcomeModal").hidden, "welcome disclaimer did not close");
 
     assert(getComputedStyle(el("status")).color === "rgb(243, 240, 255)", "Record Date status text does not use the high-contrast lavender colour");
+    assert(getComputedStyle(el("status")).fontWeight === "600", "status and feedback messages are not displayed at the requested font weight");
+    assert(formatReminderDate("2026-08-06") === "06 Aug 2026" && formatReminderDate("2026-09-02") === "02 Sep 2026", "submission reminder date format is incorrect");
     const installOptions = [...document.querySelectorAll("[data-install-platform]")];
     assert(installOptions.length === 4, "Install Clocky does not show all four platform options");
     document.querySelector('[data-install-platform="ios"]').click();
@@ -102,7 +114,59 @@
     assert(!el("submitRecord").disabled, "Submit remained disabled after saving Thursday");
     assert(el("settingsContent").hidden, "Settings did not collapse after a successful save");
     assert(el("settingsToggle").getAttribute("aria-expanded") === "false", "Settings toggle state is incorrect after save");
-    assert([...el("submitRecord").parentElement.children].slice(0, 3).map(button => button.textContent).join("|") === "Submit|Save|Clear", "Daily Entry actions are not ordered Submit, Save, Clear");
+    assert([...el("submitRecord").parentElement.children].slice(0, 4).map(button => button.textContent).join("|") === "Submit|Save|Copy Previous|Clear", "Daily Entry actions are not ordered Submit, Save, Copy Previous, Clear");
+    const actionColors = ["submitRecord", "saveDraft", "copyPrevious", "clearRecord"].map(id => getComputedStyle(el(id)).backgroundColor.match(/\d+/g).slice(0, 3).map(Number).reduce((sum, channel) => sum + channel, 0));
+    assert(actionColors.every((brightness, index) => index === 0 || brightness > actionColors[index - 1]), "Daily Entry action colours do not progress from darkest to lightest");
+    assert(formatRecordDate("2026-08-18") === "18 Aug 2026 Tue" && formatRecordDate("2026-08-21") === "21 Aug 2026 Fri" && formatRecordDate("2026-08-23") === "23 Aug 2026 Sun", "Record Date display format or local weekday is incorrect");
+    change("recordDate", "2026-08-21");
+    assert(el("recordDate").value === "2026-08-21" && el("recordDateDisplay").textContent === "21 Aug 2026 Fri", "formatted Record Date changed the underlying value or displayed the wrong weekday");
+    assert(getComputedStyle(el("dailyResults").querySelector("span")).color === getComputedStyle(el("fortnightStatus")).color, "daily result label does not use the Current badge text colour");
+    assert(getComputedStyle(el("fortnightResults").querySelector("span")).color === getComputedStyle(el("fortnightStatus")).color, "fortnight result label does not use the Current badge text colour");
+    if (innerWidth > 780) {
+      const summaryValueTops = [...el("fortnightResults").children].map(card => Math.round(card.querySelector("strong").getBoundingClientRect().top));
+      assert(new Set(summaryValueTops.slice(0, 3)).size === 1 && new Set(summaryValueTops.slice(3, 6)).size === 1, "Fortnight Summary values are not consistently bottom-aligned within each row");
+    }
+
+    // Copy Previous copies only editable record inputs, leaves the date/storage untouched, and recalculates the target date.
+    const normalPrevious = {...emptyRecord(), startTime:"09:00", lunchOut:"12:00", lunchIn:"12:30", finishTime:"17:00", dailyFlex:9999, progressiveFlex:9999};
+    state.records = {"2026-08-21":clone(normalPrevious)}; state.drafts = {}; save(); loadRecord("2026-08-24", true);
+    const storageBeforeCopy = localStorage.getItem(STORAGE_KEY), copiedDate = activeDate;
+    el("copyPrevious").click();
+    assert(activeDate === copiedDate && el("recordDate").value === copiedDate, "Copy Previous changed the current Record Date");
+    assert(el("startTime").value === "09:00" && el("finishTime").value === "17:00", "normal workday was not copied");
+    assert(draft.dailyFlex === undefined && draft.progressiveFlex === undefined, "derived Daily or Progressive balances were copied");
+    assert(localStorage.getItem(STORAGE_KEY) === storageBeforeCopy && !state.records[copiedDate] && !state.drafts[copiedDate], "Copy Previous saved, submitted, or created History data");
+    assert(metric("dailyResults", "Daily Hours") === "7:30" && metric("dailyResults", "Progressive Flex Balance") !== C.formatDuration(9999), "copied inputs were not recalculated for the current date");
+    input("finishTime", "1730"); assert(el("finishTime").value === "17:30", "copied entry could not be edited");
+    el("clearRecord").click(); assert(!el("startTime").value && !el("finishTime").value, "Clear did not clear a copied entry");
+
+    const assertCopiedDetails = (source, message) => {
+      state.records = {"2026-08-21":{...emptyRecord(), ...source}}; state.drafts = {}; loadRecord("2026-08-24", true); el("copyPrevious").click();
+      Object.entries(source).forEach(([key, value]) => { if (RECORD_FIELDS.includes(key)) assert(draft[key] === value, message); });
+    };
+    assertCopiedDetails({leaveType:"Annual", leaveHours:"7:21"}, "Annual Leave entry was not copied");
+    assert(!el("leaveToilPanel").hidden, "copied Annual Leave details were not revealed");
+    assertCopiedDetails({leaveType:"Public Holiday", leaveHours:"7:21"}, "Public Holiday entry was not copied");
+    assertCopiedDetails({leaveType:"Time off in Lieu (TOIL)", leaveHours:"1:00", toilHours:"0:30"}, "TOIL/Other Details were not copied");
+    assertCopiedDetails({attendanceType:"Senior Officer A/B", leaveType:"Personal (Certificate)", leaveHours:"7:21"}, "Senior Officer attendance details were not copied");
+    assertCopiedDetails({attendanceType:"Flextime", leaveType:"Flex", leaveHours:"1:00"}, "Flextime details were not copied");
+    assertCopiedDetails({morningOut:"10:30", morningIn:"10:45"}, "Morning Additional Time Entry was not copied");
+    assert(!el("interruptionList").hidden && el("interruptionList").textContent.includes("Morning Additional Time Entry"), "copied Morning Additional Time was not rendered");
+    assertCopiedDetails({afternoonOut:"15:00", afternoonIn:"15:20"}, "Afternoon Additional Time Entry was not copied");
+    assertCopiedDetails({morningOut:"10:30", morningIn:"10:45", afternoonOut:"15:00", afternoonIn:"15:20"}, "both Additional Time Entries were not copied");
+    assert(el("interruptionList").textContent.includes("Morning Additional Time Entry") && el("interruptionList").textContent.includes("Afternoon Additional Time Entry"), "both copied Additional Time Entries were not rendered");
+
+    state.records = {"2026-08-21":clone(normalPrevious)}; state.drafts = {}; loadRecord("2026-08-24", true); input("startTime", "0800"); el("copyPrevious").click();
+    assert(!el("copyPreviousModal").hidden && el("startTime").value === "08:00", "unsaved current data was overwritten without confirmation");
+    el("cancelCopyPrevious").click(); assert(el("startTime").value === "08:00", "cancelling Copy Previous changed the current entry");
+    el("copyPrevious").click(); el("confirmCopyPrevious").click(); assert(el("copyPreviousModal").hidden && el("startTime").value === "09:00", "confirmed Copy Previous did not replace current data");
+    el("clearRecord").click(); el("copyPrevious").click(); assert(el("copyPreviousModal").hidden && el("startTime").value === "09:00", "empty current form did not copy immediately");
+    el("saveDraft").click(); assert(state.drafts["2026-08-24"]?.record.startTime === "09:00" && !state.records["2026-08-24"], "copied entry could not be saved as a draft");
+    el("submitRecord").click(); assert(state.records["2026-08-24"]?.startTime === "09:00" && !state.drafts["2026-08-24"], "copied entry could not be submitted normally");
+    state.records = {}; state.drafts = {}; save(); loadRecord("2026-08-24", true); const emptyBeforeNoPrevious = JSON.stringify(draft); el("copyPrevious").click();
+    assert(el("status").textContent === "No previous entry available to copy." && JSON.stringify(draft) === emptyBeforeNoPrevious, "no-previous state did not show the required message or changed the form");
+
+    state.records = {}; state.drafts = {}; save(); loadRecord("2026-08-21", true);
 
     // Drafts persist separately from submitted records and never enter History or saved calculations.
     const draftDate = "2026-08-24", existingDate = "2026-08-20";
@@ -216,8 +280,32 @@
     assert(nextAvailableRecordDate("2026-07-23") === "2026-07-26", "next available date did not skip two saved records");
     state.records = recordsBeforeNextDateTests;
 
+    // Record Date selection uses the underlying ISO date and the existing confirmation modal.
+    viewStart = periodFor("2026-08-08").start; loadRecord("2026-08-07", true);
+    assert(weekdayForISO("2026-08-07") === 5 && weekdayForISO("2026-08-08") === 6 && weekdayForISO("2026-08-09") === 0 && weekdayForISO("2026-08-10") === 1, "local calendar weekday detection is incorrect");
+    change("recordDate", "2026-08-08");
+    assert(!el("workConfirmationModal").hidden && activeDate === "2026-08-07" && el("recordDate").value === "2026-08-08", "selecting Saturday 08 Aug 2026 did not open the weekend confirmation from the underlying date value");
+    el("cancelSpecialWork").click();
+    assert(activeDate === "2026-08-07" && el("recordDate").value === "2026-08-07" && el("recordDateDisplay").textContent === "07 Aug 2026 Fri", "cancelling Saturday selection did not restore the prior Record Date");
+    change("recordDate", "2026-08-08"); el("confirmSpecialWork").click();
+    assert(activeDate === "2026-08-08" && el("recordDateDisplay").textContent === "08 Aug 2026 Sat", "confirming Saturday selection did not load the weekend date");
+
+    loadRecord("2026-08-07", true); change("recordDate", "2026-08-09");
+    assert(!el("workConfirmationModal").hidden && activeDate === "2026-08-07", "selecting Sunday 09 Aug 2026 did not open the weekend confirmation");
+    el("confirmSpecialWork").click(); assert(activeDate === "2026-08-09", "confirming Sunday selection did not load the weekend date");
+    change("recordDate", "2026-08-10"); assert(el("workConfirmationModal").hidden && activeDate === "2026-08-10", "Monday 10 Aug 2026 incorrectly triggered the weekend confirmation");
+    change("recordDate", "2026-08-07"); assert(el("workConfirmationModal").hidden && activeDate === "2026-08-07", "Friday 07 Aug 2026 incorrectly triggered the weekend confirmation");
+
+    state.records["2026-08-08"] = clone(working); save(); renderAll();
+    el("recordsBody").querySelector('[data-edit="2026-08-08"]').click();
+    assert(!el("workConfirmationModal").hidden && activeDate === "2026-08-07" && !editMode, "editing an existing weekend record bypassed the weekend confirmation");
+    el("confirmSpecialWork").click();
+    assert(activeDate === "2026-08-08" && editMode && el("startTime").value === "09:00", "confirmed weekend History edit did not load the existing record");
+    el("cancelEdit").click(); delete state.records["2026-08-08"]; save();
+    viewStart = periodFor("2026-08-21").start; loadRecord("2026-08-21", true);
+
     // End-to-end Saturday diagnostic and hard-gate test through the real controls and Submit button.
-    change("recordDate", "2026-08-22"); el("toggleLeaveToil").click(); change("leaveType", "Annual"); change("leaveHours", "721"); el("toggleLeaveToil").click();
+    change("recordDate", "2026-08-22"); assert(!el("workConfirmationModal").hidden, "Saturday selection warning did not precede Daily Entry"); el("confirmSpecialWork").click(); el("toggleLeaveToil").click(); change("leaveType", "Annual"); change("leaveHours", "721"); el("toggleLeaveToil").click();
     assert(el("leaveToilPanel").hidden && el("leaveType").value === "Annual" && el("leaveHours").value === "7:21", "collapsing Leave / TOIL discarded entered values");
     let candidate = readForm();
     assert(activeDate === "2026-08-22" && DAY_NAMES[new Date(`${activeDate}T00:00:00`).getDay()] === "Saturday", "Saturday Record Date did not reach submit state");
@@ -437,6 +525,56 @@
 
     const csvPackage = buildCsvPackage(viewStart);
     assert(csvPackage.rows.length === 15 && csvPackage.filename.endsWith(".csv"), "email CSV package does not contain the existing 14-day export");
+    const csvBeforeWorkbookTests = csvPackage.csv;
+
+    // Multi-period XLSX export uses complete intersecting fortnights, skips empty periods, and preserves the CSV schema.
+    const exportRecord = {...emptyRecord("Flextime"), startTime:"09:00", lunchOut:"12:00", lunchIn:"12:30", finishTime:"16:51"};
+    [["020826", "02 Aug 2026"], ["02 08 26", "02 Aug 2026"], ["02082026", "02 Aug 2026"], ["02 08 2026", "02 Aug 2026"], ["311226", "31 Dec 2026"], ["010127", "01 Jan 2027"], ["290224", "29 Feb 2024"]].forEach(([entered, expected]) => assert(parseWorkbookDate(entered)?.display === expected, `${entered} did not parse as ${expected}`));
+    ["290226", "310426", "31022026", "31 02 26", "32132026"].forEach(entered => assert(parseWorkbookDate(entered) === null, `${entered} was incorrectly accepted as a calendar date`));
+    input("exportPeriodFrom", "020826"); el("exportPeriodFrom").dispatchEvent(new Event("blur"));
+    input("exportPeriodTo", "02082026"); el("exportPeriodTo").dispatchEvent(new Event("blur"));
+    assert(el("exportPeriodFrom").value === "02 Aug 2026" && el("exportPeriodFromError").hidden && el("exportPeriodTo").value === "02 Aug 2026" && el("exportPeriodToError").hidden, "compact dates were rejected or not normalized by the actual Period From/To fields");
+    state.records = {"2026-08-20":clone(exportRecord), "2026-09-03":clone(exportRecord), "2026-09-17":clone(exportRecord)};
+    input("exportPeriodFrom", "20 08 2026"); el("exportPeriodFrom").dispatchEvent(new Event("blur"));
+    input("exportPeriodTo", "02 09 2026"); el("exportPeriodTo").dispatchEvent(new Event("change"));
+    assert(el("exportPeriodFrom").value === "20 Aug 2026" && el("exportPeriodTo").value === "02 Sep 2026", "workbook dates were not normalized to DD MMM YYYY");
+    let workbook = exportWorkbook({download:() => {}});
+    assert(workbook.sheets.length === 1 && workbook.sheets[0].name === "20 Aug - 2 Sep" && workbook.filename.endsWith(".xlsx"), "one reporting period did not produce one correctly named workbook sheet");
+    assert(workbook.sheets[0].rows.length === csvPackage.rows.length && workbook.sheets[0].rows[0].join("|") === csvPackage.rows[0].join("|"), "workbook did not reuse the existing fortnight CSV schema");
+
+    input("exportPeriodFrom", "25 08 2026"); input("exportPeriodTo", "20 09 2026");
+    workbook = exportWorkbook({download:() => {}});
+    assert(workbook.sheets.map(sheet => sheet.name).join("|") === "20 Aug - 2 Sep|3 Sep - 16 Sep|17 Sep - 30 Sep", "mid-period From date or multiple reporting periods were selected incorrectly");
+    input("exportPeriodFrom", "20 08 2026"); input("exportPeriodTo", "05 09 2026"); workbook = exportWorkbook({download:() => {}});
+    assert(workbook.sheets.length === 2 && workbook.sheets.at(-1).name === "3 Sep - 16 Sep", "mid-period To date did not include the complete intersecting reporting period");
+    delete state.records["2026-09-03"];
+    input("exportPeriodFrom", "20 08 2026"); input("exportPeriodTo", "20 09 2026"); workbook = exportWorkbook({download:() => {}});
+    assert(workbook.sheets.map(sheet => sheet.name).join("|") === "20 Aug - 2 Sep|17 Sep - 30 Sep", "empty reporting periods were not skipped");
+    assert(workbook.blob.type === "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" && workbook.files.some(file => file.name === "xl/workbook.xml"), "export did not build a valid XLSX package structure");
+    const workbookBytes = new Uint8Array(await workbook.blob.arrayBuffer()), workbookView = new DataView(workbookBytes.buffer, workbookBytes.byteOffset, workbookBytes.byteLength);
+    const eocdOffset = workbookBytes.length - 22;
+    assert(workbookView.getUint32(eocdOffset, true) === 0x06054b50, "XLSX ZIP end-of-central-directory signature is missing");
+    const centralEntryCount = workbookView.getUint16(eocdOffset + 10, true), centralSize = workbookView.getUint32(eocdOffset + 12, true), centralOffset = workbookView.getUint32(eocdOffset + 16, true);
+    assert(centralEntryCount === workbook.files.length, "XLSX ZIP central-directory entry count is incorrect");
+    let centralCursor = centralOffset;
+    for (let entry = 0; entry < centralEntryCount; entry++) {
+      assert(workbookView.getUint32(centralCursor, true) === 0x02014b50, `XLSX ZIP central entry ${entry + 1} has an invalid signature`);
+      const nameLength = workbookView.getUint16(centralCursor + 28, true), extraLength = workbookView.getUint16(centralCursor + 30, true), commentLength = workbookView.getUint16(centralCursor + 32, true), localOffset = workbookView.getUint32(centralCursor + 42, true);
+      assert(workbookView.getUint32(localOffset, true) === 0x04034b50, `XLSX ZIP central entry ${entry + 1} points to an invalid local header`);
+      centralCursor += 46 + nameLength + extraLength + commentLength;
+    }
+    assert(centralCursor === centralOffset + centralSize && centralCursor === eocdOffset, "XLSX ZIP central-directory size or offset is inconsistent");
+
+    input("exportPeriodFrom", "31 02 2026"); input("exportPeriodTo", "20 09 2026");
+    assert(exportWorkbook({download:() => {}}) === "invalid" && !el("exportPeriodFromError").hidden, "invalid From date was not rejected inline");
+    input("exportPeriodFrom", "20 08 2026"); input("exportPeriodTo", "not a date");
+    assert(exportWorkbook({download:() => {}}) === "invalid" && !el("exportPeriodToError").hidden, "invalid To date was not rejected inline");
+    input("exportPeriodFrom", "20 09 2026"); input("exportPeriodTo", "20 08 2026");
+    assert(exportWorkbook({download:() => {}}) === "invalid-range" && el("exportPeriodToError").textContent === "Period To cannot be earlier than Period From.", "To earlier than From was not rejected inline");
+    state.records = {}; input("exportPeriodFrom", "20 08 2026"); input("exportPeriodTo", "20 09 2026");
+    assert(exportWorkbook({download:() => {}}) === "empty" && el("workbookExportStatus").textContent === "No timesheet records found for this period.", "record-free range did not suppress download and show the required message");
+    assert(buildCsvPackage(viewStart).csv === csvBeforeWorkbookTests, "existing single-fortnight CSV export changed after workbook export");
+
     openEmailModal(); input("emailTo", "not-an-email");
     assert(await sendEmailCsv({ navigator:{} }) === "invalid" && !el("emailToError").hidden, "invalid email was not rejected inline");
     input("emailTo", "person@example.com");
@@ -449,6 +587,54 @@
     assert(fallbackResult === "fallback" && downloaded === csvPackage.filename && openedMailto.startsWith("mailto:person%40example.com"), "fallback did not download CSV and open mailto");
     assert(el("emailStatus").textContent.includes("Please attach the downloaded CSV"), "fallback attachment message is missing");
     closeEmailModal();
+
+    // Marking an overdue fortnight ends after saving status; export remains an explicit separate action.
+    const overdueStart = "2026-08-06";
+    state.records = {[overdueStart]:clone(exportRecord)}; state.submissions = {}; viewStart = overdueStart; save(); renderAll();
+    assert(!el("submissionReminder").hidden && reminderStart === overdueStart, "overdue fortnight reminder test setup failed");
+    let exportPromptCount = 0;
+    window.confirm = message => { if (/CSV|export|share/i.test(message)) exportPromptCount++; return true; };
+    el("markSubmitted").click();
+    window.confirm = () => true;
+    assert(state.submissions[overdueStart]?.submitted && state.submissions[overdueStart]?.changed === false, "Mark fortnight as submitted did not preserve the existing submission state logic");
+    assert(exportPromptCount === 0, "Mark fortnight as submitted triggered an export/download/share prompt");
+    assert(el("submissionReminder").hidden && el("status").textContent === "Fortnight marked as submitted.", "submitted reminder or success feedback did not update normally");
+
+    // A submitted fortnight warns only on the persisted false -> true changed-state transition.
+    const resubmissionWarning = "This fortnight was previously submitted. The saved record has changed and the fortnight may need to be resubmitted.";
+    const resubmissionWarningCount = () => alerts.filter(message => message === resubmissionWarning).length;
+    const workdayRecord = (finishTime = "16:51") => ({...emptyRecord("Flextime"), startTime:"09:00", lunchOut:"12:00", lunchIn:"12:30", finishTime});
+    const submitWorkday = (date, finishTime = "16:51", mode = "new") => {
+      loadRecord(date, true, mode);
+      input("startTime", "0900"); input("lunchOut", "1200"); input("lunchIn", "1230"); input("finishTime", finishTime.replace(":", ""));
+      el("submitRecord").click();
+    };
+    const submittedFortnightA = "2026-08-20", submittedFortnightB = "2026-09-03";
+    state.records = {}; state.submissions = {[submittedFortnightA]:{submitted:true, changed:false, submittedAt:"2026-08-20T00:00:00.000Z"}}; viewStart = submittedFortnightA; save();
+    const warningsBeforeSequence = resubmissionWarningCount();
+    submitWorkday("2026-08-24");
+    assert(resubmissionWarningCount() === warningsBeforeSequence + 1 && state.submissions[submittedFortnightA].changed, "Day 1 did not show exactly one resubmission warning and enter changed state");
+    assert(JSON.parse(localStorage.getItem(STORAGE_KEY)).submissions[submittedFortnightA].changed, "changed/acknowledged state was not persisted after Day 1");
+    submitWorkday("2026-08-25");
+    submitWorkday("2026-08-26");
+    submitWorkday("2026-08-24", "17:01", "edit");
+    assert(resubmissionWarningCount() === warningsBeforeSequence + 1, "Day 2, Day 3, or the second Day 1 edit repeated the resubmission warning");
+
+    state = load(); renderSettings(); viewStart = submittedFortnightA;
+    submitWorkday("2026-08-25", "17:11", "edit");
+    assert(state.submissions[submittedFortnightA].changed && resubmissionWarningCount() === warningsBeforeSequence + 1, "refresh/reload lost the acknowledged needs-resubmission state");
+    renderAll();
+    assert(reminderStart === submittedFortnightA, "changed submitted fortnight was not available to mark as submitted again");
+    el("markSubmitted").click();
+    assert(state.submissions[submittedFortnightA].submitted && !state.submissions[submittedFortnightA].changed, "explicit resubmission did not reset the changed transition state");
+    submitWorkday("2026-08-26", "17:21", "edit");
+    assert(resubmissionWarningCount() === warningsBeforeSequence + 2 && state.submissions[submittedFortnightA].changed, "first change after explicit resubmission did not warn again exactly once");
+    submitWorkday("2026-08-25", "17:31", "edit");
+    assert(resubmissionWarningCount() === warningsBeforeSequence + 2, "second change after explicit resubmission repeated the warning");
+
+    state.records["2026-09-07"] = workdayRecord(); state.submissions[submittedFortnightB] = {submitted:true, changed:false, submittedAt:"2026-09-03T00:00:00.000Z"}; save();
+    submitWorkday("2026-09-07", "17:01", "edit");
+    assert(resubmissionWarningCount() === warningsBeforeSequence + 3 && state.submissions[submittedFortnightB].changed, "Fortnight A acknowledgement suppressed Fortnight B's first warning");
 
     // Destructive history reset preserves Settings but removes every historical source of balances.
     state.settings.attendanceType = "Flextime";
@@ -497,7 +683,7 @@
     }
     if (innerWidth <= 600) assert(Math.round(parseFloat(getComputedStyle(el("fortnightStart")).height)) === 48, "mobile Fortnight Start Date is not 48px high");
     window.scrollTo(0, 0);
-    result.textContent = "PASS: attendance settings Leave TOIL welcome Feedback shared durations email CSV validation synchronized calculations responsive workflow";
+    result.textContent = "PASS: Copy Previous record date summary colours attendance settings Leave TOIL welcome Feedback shared durations email CSV validation synchronized calculations responsive workflow";
   } catch (error) {
     result.textContent = `FAIL: ${error.message}`;
   } finally { restore(); }

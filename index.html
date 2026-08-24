@@ -11,7 +11,7 @@
   <link rel="manifest" href="manifest.webmanifest?v=clocky-icon-v2">
   <link rel="icon" type="image/png" sizes="192x192" href="assets/icons/clocky-icon-192.png?v=clocky-icon-v2">
   <link rel="apple-touch-icon" sizes="180x180" href="assets/icons/clocky-apple-touch-icon-180.png?v=clocky-icon-v2">
-  <link rel="stylesheet" href="styles.css?v=workflow-simplification-v1">
+  <link rel="stylesheet" href="styles.css?v=collapsed-sections-v1">
 </head>
 <body>
   <main>
@@ -20,7 +20,7 @@
         <div class="brand-block">
           <h1>Clocky</h1>
           <p>Simple Timesheet Tracking</p>
-          <label class="date-label hero-record-date">Record Date <input id="recordDate" type="date" required></label>
+          <label class="date-label hero-record-date">Record Date <span class="record-date-control"><input id="recordDate" type="date" required><span id="recordDateDisplay" aria-hidden="true"></span></span></label>
         </div>
       </div>
     </header>
@@ -47,9 +47,10 @@
         </div>
         <div class="record-actions"><button id="cancelLeaveToil" class="secondary" type="button">Cancel</button></div>
       </div>
-      <div class="record-actions">
+      <div class="record-actions daily-entry-actions">
         <button id="submitRecord">Submit</button>
         <button id="saveDraft" class="draft-save" type="button">Save</button>
+        <button id="copyPrevious" class="copy-previous" type="button">Copy Previous</button>
         <button id="clearRecord" class="secondary" type="button">Clear</button>
         <button id="cancelEdit" class="secondary" hidden>Cancel Edit</button>
       </div>
@@ -71,11 +72,11 @@
     </section>
 
     <section class="card settings">
-      <div id="settingsToggle" class="settings-heading" role="button" tabindex="0" aria-expanded="true" aria-controls="settingsContent">
+      <div id="settingsToggle" class="settings-heading" role="button" tabindex="0" aria-expanded="false" aria-controls="settingsContent">
         <h2>Settings</h2>
-        <button id="settingsToggleButton" class="settings-toggle" type="button" tabindex="-1" aria-label="Collapse Settings">−</button>
+        <button id="settingsToggleButton" class="settings-toggle" type="button" tabindex="-1" aria-label="Expand Settings">+</button>
       </div>
-      <div id="settingsContent">
+      <div id="settingsContent" hidden>
         <p class="muted">Changes recalculate every saved record.</p>
         <div class="form-grid">
           <label>Attendance Type
@@ -99,11 +100,26 @@
     </section>
 
     <section class="card historical-timesheets">
-      <h2>Historical Timesheets</h2>
-      <div class="history-filters">
-        <label>Year <select id="filterYear"></select></label>
-        <label>Month <select id="filterMonth"></select></label>
-        <label>Fortnight <select id="viewFortnight"></select></label>
+      <div id="historicalToggle" class="settings-heading" role="button" tabindex="0" aria-expanded="false" aria-controls="historicalContent">
+        <h2>Historical Timesheets</h2>
+        <button id="historicalToggleButton" class="settings-toggle" type="button" tabindex="-1" aria-label="Expand Historical Timesheets">+</button>
+      </div>
+      <div id="historicalContent" hidden>
+        <div class="history-filters">
+          <label>Year <select id="filterYear"></select></label>
+          <label>Month <select id="filterMonth"></select></label>
+          <label>Fortnight <select id="viewFortnight"></select></label>
+          <button id="exportSelectedFortnight" class="secondary" type="button">Export</button>
+        </div>
+        <div class="multi-period-export">
+          <h3>Export Multiple Periods</h3>
+          <div class="multi-period-fields">
+            <label>Period From <input id="exportPeriodFrom" type="text" inputmode="numeric" autocomplete="off" placeholder="DD MM YYYY" aria-describedby="exportPeriodFromError"><span id="exportPeriodFromError" class="field-error" role="alert" hidden>Enter a valid date in DD MM YYYY format.</span></label>
+            <label>Period To <input id="exportPeriodTo" type="text" inputmode="numeric" autocomplete="off" placeholder="DD MM YYYY" aria-describedby="exportPeriodToError"><span id="exportPeriodToError" class="field-error" role="alert" hidden>Enter a valid date in DD MM YYYY format.</span></label>
+            <button id="exportWorkbook" class="secondary" type="button">Export</button>
+          </div>
+          <p id="workbookExportStatus" class="inline-status" role="status" aria-live="polite"></p>
+        </div>
       </div>
     </section>
 
@@ -168,6 +184,13 @@
       <div class="modal-actions"><button id="confirmSpecialWork" type="button">Confirm</button><button id="cancelSpecialWork" class="secondary" type="button">Go Back</button></div>
     </section>
   </div>
+  <div id="copyPreviousModal" class="modal-backdrop" hidden>
+    <section class="dialog-card welcome-modal" role="dialog" aria-modal="true" aria-labelledby="copyPreviousTitle">
+      <h2 id="copyPreviousTitle">Replace current entry?</h2>
+      <p>Replace current entry with the previous saved entry?</p>
+      <div class="modal-actions"><button id="cancelCopyPrevious" class="secondary" type="button">Cancel</button><button id="confirmCopyPrevious" class="copy-previous" type="button">Copy Previous</button></div>
+    </section>
+  </div>
   <div id="feedbackModal" class="modal-backdrop" hidden>
     <section class="dialog-card feedback-modal" role="dialog" aria-modal="true" aria-labelledby="feedbackModalTitle">
       <div class="section-heading"><h2 id="feedbackModalTitle">Clocky Beta Feedback</h2><button id="closeFeedback" class="secondary modal-close" type="button" aria-label="Close">×</button></div>
@@ -222,7 +245,7 @@
     </section>
   </div>
   <script src="calculator.js"></script>
-  <script src="app.js?v=dynamic-history-labels-v1"></script>
+  <script src="app.js?v=collapsed-sections-v1"></script>
   <script src="pwa-register.js?v=install-clocky-v1"></script>
 </body>
 </html>

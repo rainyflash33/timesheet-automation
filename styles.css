@@ -9,15 +9,20 @@ main { width: min(1040px, calc(100% - 32px)); min-height: 100vh; margin: 36px au
 .brand-block h1 { margin-bottom: 5px; color: #241c32; font-weight: 800; }
 .brand-block p { margin: 0; color: #756d82; font-size: .95rem; font-weight: 500; }
 .hero-record-date { width: 100%; max-width: 330px; margin-top: 24px; }
-.history-filters { display: grid; grid-template-columns: minmax(120px, .7fr) minmax(150px, .9fr) minmax(260px, 1.6fr); gap: 14px; align-items: end; }
+.record-date-control { position: relative; display: block; }
+#recordDate { color: transparent; }
+#recordDate::-webkit-datetime-edit { opacity: 0; }
+#recordDateDisplay { position: absolute; inset: 0 40px 0 11px; display: flex; align-items: center; color: #24212b; font-size: inherit; font-weight: inherit; pointer-events: none; white-space: nowrap; }
+.history-filters { display: grid; grid-template-columns: minmax(120px, .7fr) minmax(150px, .9fr) minmax(260px, 1.6fr) auto; gap: 14px; align-items: end; }
 .history-filters > * { min-width: 0; }
+.history-filters > button { align-self: end; }
 h1 { font-size: clamp(2rem, 4vw, 2.75rem); margin: 0; letter-spacing: -.035em; }
 h2 { font-size: 1.05rem; margin: 0 0 18px; }
 .settings-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; cursor: pointer; }
 .settings-heading h2 { margin: 0; }
 .settings-toggle { width: 34px; min-width: 34px; min-height: 34px; padding: 0; border-radius: 999px; background: #eee9f8; color: #594487; font-size: 1.15rem; line-height: 1; }
 .settings-toggle:hover { background: #e3daf3; }
-#settingsContent[hidden] { display: none; }
+#settingsContent[hidden], #historicalContent[hidden] { display: none; }
 #settingsContent > .muted { margin-top: 12px; }
 h3 { font-size: .95rem; margin-top: 24px; }
 .muted { color: #756d82; }
@@ -48,6 +53,8 @@ button { border: 0; min-height: 38px; padding: 9px 14px; background: #6848a8; co
 button:hover { background: #56378f; }
 .draft-save { background: #9a83c7; color: #FFFFFF; }
 .draft-save:hover { background: #8b72bd; }
+.copy-previous { background: #ddd4ee; color: #594487; }
+.copy-previous:hover { background: #d0c4e6; }
 .secondary { background: #eee9f8; color: #594487; }
 .secondary:hover { background: #e3daf3; }
 .link-button { min-height: auto; background: transparent; color: #6848a8; padding: 4px; }
@@ -59,6 +66,7 @@ button:hover { background: #56378f; }
 .danger-button:hover { background: #862323; }
 .danger-button:disabled { background: #c9bfc8; cursor: not-allowed; }
 .record-actions { display: flex; gap: 10px; margin-top: 18px; }
+.daily-entry-actions button { padding-right: 10px; padding-left: 10px; }
 .inline-status { align-self: center; color: #6848a8; font-size: .85rem; font-weight: 700; }
 .inline-status.error { color: #a32d2d; }
 .field-error { color: #a32d2d; font-size: .78rem; font-weight: 650; }
@@ -102,11 +110,11 @@ textarea:focus { outline: 3px solid rgba(107,76,166,.18); border-color: #7454b3;
 .metrics { display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; }
 #dailyResults { grid-template-columns: repeat(4, 1fr); }
 #fortnightResults { grid-template-columns: repeat(3, 1fr); gap: 14px; }
-.metrics div { position: relative; background: #f5f0fb; border: 1px solid #dacdeb; padding: 14px; border-radius: 10px; }
-.metrics span { display: block; color: #756d82; font-size: .75rem; min-height: 2em; }
-.metrics small { display: block; color: #857c91; font-size: .68rem; line-height: 1.25; min-height: 2.5em; }
-.metrics strong { display: block; font-size: 1.25rem; margin-top: 6px; }
-.status { color: #6b4c91; margin: 20px 0 0; padding-bottom: 20px; line-height: 1.45; }
+.metrics div { position: relative; display: flex; flex-direction: column; background: #f5f0fb; border: 1px solid #dacdeb; padding: 14px; border-radius: 10px; }
+.metrics span { display: block; color: #594487; font-size: .75rem; min-height: 2em; }
+.metrics small { display: block; color: #594487; font-size: .68rem; line-height: 1.25; min-height: 2.5em; }
+.metrics strong { display: block; margin-top: auto; padding-top: 6px; font-size: 1.25rem; }
+.status { color: #6b4c91; margin: 20px 0 0; padding-bottom: 20px; font-weight: 600; line-height: 1.45; }
 .hero + #status { color: #f3f0ff; }
 .status:empty { margin-top: 0; padding-bottom: 0; }
 .status:not(:empty) + .submission-reminder { margin-top: 0; }
@@ -124,6 +132,11 @@ textarea:focus { outline: 3px solid rgba(107,76,166,.18); border-color: #7454b3;
 table { width: 100%; border-collapse: collapse; font-size: .88rem; }
 th, td { padding: 11px 8px; border-bottom: 1px solid #eeeaf2; text-align: left; white-space: nowrap; }
 .weekday-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 10px; margin-bottom: 18px; }
+.multi-period-export { margin-top: 22px; }
+.multi-period-export h3 { margin: 0 0 14px; color: #514a5c; }
+.multi-period-fields { display: grid; grid-template-columns: minmax(150px, 1fr) minmax(150px, 1fr) auto; gap: 14px; align-items: start; }
+.multi-period-fields button { align-self: end; }
+#workbookExportStatus { min-height: 1.25em; margin: 10px 0 0; }
 .install-card h2 { margin-bottom: 14px; }
 .install-options { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
 .install-option { display: grid; grid-template-columns: 28px 1fr; grid-template-rows: auto auto; column-gap: 10px; row-gap: 3px; min-width: 0; min-height: 76px; padding: 12px; border: 1px solid #ded5ec; background: #f7f3fc; color: #514a5c; text-align: left; }
@@ -186,10 +199,12 @@ th, td { padding: 11px 8px; border-bottom: 1px solid #eeeaf2; text-align: left; 
   .basic-time-fields,
   .interruption-editor .interruption-inputs,
   .leave-toil-grid,
-  .history-filters {
+  .history-filters,
+  .multi-period-fields {
     width: 100%;
     grid-template-columns: 1fr;
   }
+  .multi-period-fields button { width: 100%; }
   .metrics, #dailyResults { grid-template-columns: repeat(2, 1fr); }
   #fortnightResults { grid-template-columns: 1fr; }
   .weekday-grid { grid-template-columns: repeat(2, 1fr); }
@@ -288,6 +303,10 @@ th, td { padding: 11px 8px; border-bottom: 1px solid #eeeaf2; text-align: left; 
     padding: 7px 10px;
   }
   .settings.settings-collapsed {
+    padding-top: 13px;
+    padding-bottom: 13px;
+  }
+  .historical-timesheets.section-collapsed {
     padding-top: 13px;
     padding-bottom: 13px;
   }
