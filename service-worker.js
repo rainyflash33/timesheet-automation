@@ -1,12 +1,12 @@
 const CACHE_PREFIX = "clocky-shell-";
-const CACHE_NAME = `${CACHE_PREFIX}v20`;
+const CACHE_NAME = `${CACHE_PREFIX}v21`;
 const APP_SHELL = [
   "./",
   "./index.html",
-  "./styles.css?v=settings-helper-layout-v1",
-  "./calculator.js",
-  "./app.js?v=hero-status-layout-v1",
-  "./pwa-register.js?v=install-clocky-v1",
+  "./styles.css?v=clocky-release-v21",
+  "./calculator.js?v=clocky-release-v21",
+  "./app.js?v=clocky-release-v21",
+  "./pwa-register.js?v=clocky-release-v21",
   "./manifest.webmanifest?v=clocky-icon-v2",
   "./assets/clocky-hero-office.jpeg",
   "./assets/icons/clocky-icon-192.png?v=clocky-icon-v2",
@@ -18,7 +18,7 @@ const APP_SHELL = [
 const CACHEABLE_PATHS = new Set(APP_SHELL.map(path => new URL(path, self.location.href).pathname));
 
 self.addEventListener("install", event => {
-  event.waitUntil(caches.open(CACHE_NAME).then(cache => cache.addAll(APP_SHELL)).then(() => self.skipWaiting()));
+  event.waitUntil(caches.open(CACHE_NAME).then(cache => cache.addAll(APP_SHELL.map(url => new Request(url, {cache:"reload"})))).then(() => self.skipWaiting()));
 });
 
 self.addEventListener("activate", event => {

@@ -1,5 +1,6 @@
 (async function () {
   const result = document.createElement("pre"); result.id = "testResult"; result.style.cssText = "position:fixed;z-index:9999;left:8px;bottom:8px;max-width:calc(100% - 16px);white-space:pre-wrap;background:white;color:black;padding:8px;border:2px solid #6848a8"; document.body.append(result);
+  const visualScale = document.documentElement.clientWidth <= 600 ? .85 : 1;
   const originalStoredValue = localStorage.getItem(STORAGE_KEY);
   const originalConfirm = window.confirm;
   const originalAlert = window.alert;
@@ -31,10 +32,10 @@
     const mainLayout = document.querySelector("main"), primaryFlowStyle = getComputedStyle(el("primaryEntryFlow")), heroStyle = getComputedStyle(document.querySelector(".hero")), dailyEntryStyle = getComputedStyle(el("dailyEntryCard"));
     assert(mainLayout.classList.contains("layout-unified") && el("submissionReminder").hidden, "no-reminder state did not select the unified hero and Daily Entry layout");
     assert(primaryFlowStyle.overflow === "hidden" && primaryFlowStyle.backgroundColor !== "rgba(0, 0, 0, 0)" && heroStyle.borderBottomLeftRadius === "0px" && dailyEntryStyle.marginTop === "0px" && dailyEntryStyle.borderTopWidth === "0px" && dailyEntryStyle.borderBottomWidth === "0px" && dailyEntryStyle.borderTopLeftRadius === "0px" && dailyEntryStyle.boxShadow === "none", "unified layout has a gap, shadow seam, separate card border, or doubled radius at the hero/Daily Entry join");
-    assert(getComputedStyle(document.querySelector(".hero"), "::after").backgroundImage.includes("linear-gradient") && getComputedStyle(document.querySelector(".hero"), "::after").height === "28px", "unified hero does not have the requested short CSS fade into Daily Entry");
+    assert(getComputedStyle(document.querySelector(".hero"), "::after").backgroundImage.includes("linear-gradient") && Math.abs(parseFloat(getComputedStyle(document.querySelector(".hero"), "::after").height) - 28 * visualScale) < .03, "unified hero does not have the requested short CSS fade into Daily Entry");
     showStatus("Draft saved");
     assert(getComputedStyle(el("status")).backgroundColor === getComputedStyle(el("dailyEntryCard")).backgroundColor && getComputedStyle(el("status")).borderTopWidth === "0px" && getComputedStyle(el("status")).boxShadow === "none", "Draft saved introduced a separate status surface or divider");
-    showStatus("Fortnight marked as submitted.");
+    showStatus("This fortnight has been submitted. You can no longer edit its entries directly. To make changes, go to Historical Timesheets, select the relevant fortnight, and click Edit Timesheet.");
     assert(mainLayout.classList.contains("layout-unified") && getComputedStyle(el("status")).color === "rgb(104, 72, 168)" && getComputedStyle(el("status")).backgroundColor === getComputedStyle(el("dailyEntryCard")).backgroundColor, "informational status is not purple text on the exact Daily Entry surface");
     showStatus(""); state.submissions = {}; renderAll();
     el("historicalToggle").click();
@@ -47,9 +48,10 @@
     assert(el("dailyBalanceHeading").textContent === "Daily Flex" && el("progressiveBalanceHeading").textContent === "Progressive Flex", "Flextime history headings are incorrect");
     assert(!document.querySelector(".danger-zone h3") && document.querySelector(".danger-zone-title").textContent === "Delete All Saved Timesheet Records", "reset section cosmetic title is incorrect");
     assert(getComputedStyle(document.querySelector(".danger-zone")).borderTopStyle !== "none", "reset section divider was removed");
-    assert(document.querySelector('script[src="app.js?v=hero-status-layout-v1"]'), "page is not loading the cache-busted hero-status-layout application bundle");
-    assert(document.querySelector('link[href="styles.css?v=settings-helper-layout-v1"]'), "page is not loading the cache-busted Settings helper-layout stylesheet");
-    assert([...document.querySelector(".history-filters").children].map(control => control.tagName === "LABEL" ? control.childNodes[0].textContent.trim() : control.textContent.trim()).join("|") === "Year|Month|Fortnight|Export", "Historical Timesheets controls are not ordered Year, Month, Fortnight, Export");
+    assert(document.querySelector('script[src="app.js?v=clocky-release-v21"]'), "page is not loading the current summary presentation bundle");
+    assert(document.querySelector('link[href="styles.css?v=clocky-release-v21"]'), "page is not loading the current desktop/tablet summary stylesheet");
+    assert([...document.querySelectorAll(".history-filters > label")].map(control => control.childNodes[0].textContent.trim()).join("|") === "Year|Month|Fortnight", "Historical Timesheets selectors changed");
+    assert([...document.querySelectorAll(".historical-actions button")].filter(button => !button.hidden).map(button => button.textContent.trim()).join("|") === "Edit Timesheet|Export", "historical actions must put Edit Timesheet before Export");
     assert(el("exportSelectedFortnight").classList.contains("secondary") && el("exportMultiplePeriods").classList.contains("secondary") && el("exportMultiplePeriods").textContent === "Export", "Historical Timesheets export actions do not share the secondary utility style or wording");
     assert(getComputedStyle(document.querySelector(".multi-period-export")).borderTopStyle === "none" && getComputedStyle(document.querySelector(".multi-period-export h3")).color === "rgb(81, 74, 92)", "Export Multiple Periods heading or divider styling is incorrect");
 
@@ -132,12 +134,12 @@
     assert(formatRecordDate("2026-08-18") === "18 Aug 2026 Tue" && formatRecordDate("2026-08-21") === "21 Aug 2026 Fri" && formatRecordDate("2026-08-23") === "23 Aug 2026 Sun", "Record Date display format or local weekday is incorrect");
     change("recordDate", "2026-08-21");
     assert(el("recordDate").value === "2026-08-21" && el("recordDateDisplay").textContent === "21 Aug 2026 Fri", "formatted Record Date changed the underlying value or displayed the wrong weekday");
-    assert(getComputedStyle(el("dailyResults").querySelector("span")).color === getComputedStyle(el("fortnightStatus")).color, "daily result label does not use the Current badge text colour");
-    assert(getComputedStyle(el("fortnightResults").querySelector("span")).color === getComputedStyle(el("fortnightStatus")).color, "fortnight result label does not use the Current badge text colour");
-    if (innerWidth > 780) {
-      const summaryValueTops = [...el("fortnightResults").children].map(card => Math.round(card.querySelector("strong").getBoundingClientRect().top));
-      assert(new Set(summaryValueTops.slice(0, 3)).size === 1 && new Set(summaryValueTops.slice(3, 6)).size === 1, "Fortnight Summary values are not consistently bottom-aligned within each row");
-    }
+    // The selected August period can be overdue; its red badge must not change metric label colours.
+    assert(getComputedStyle(el("dailyResults").querySelector("span")).color === "rgb(89, 68, 135)", "daily result label lost its stable purple text colour");
+    assert(getComputedStyle(el("fortnightResults").querySelector("span")).color === "rgb(89, 68, 135)", "fortnight result label lost its stable purple text colour");
+    const summaryValueTops = [...el("fortnightResults").children].map(card => Math.round(card.querySelector("strong").getBoundingClientRect().top));
+    const summaryColumns = document.documentElement.clientWidth <= 600 ? 2 : 3;
+    assert(summaryValueTops.every((top, index) => index % summaryColumns === 0 || top === summaryValueTops[index - 1]), "Fortnight Summary values are not bottom-aligned within their responsive row");
 
     // Copy Previous copies only editable record inputs, leaves the date/storage untouched, and recalculates the target date.
     const normalPrevious = {...emptyRecord(), startTime:"09:00", lunchOut:"12:00", lunchIn:"12:30", finishTime:"17:00", dailyFlex:9999, progressiveFlex:9999};
@@ -229,7 +231,7 @@
     const normalRecordDate = activeDate;
     el("submitRecord").click();
     assert(state.records[normalRecordDate]?.finishTime === "17:21" && state.records[normalRecordDate]?.attendanceType === "Flextime", "normal working day did not submit with the Attendance Type default");
-    assert(activeDate === C.addDays(normalRecordDate, 1) && el("recordDate").value === activeDate, "new record submission did not advance one day");
+    assert(activeDate === nextAvailableRecordDate(normalRecordDate) && el("recordDate").value === activeDate, "new record submission did not advance one day");
     el("recordsBody").querySelector(`[data-delete="${normalRecordDate}"]`).click();
     assert(el("leaveToilPanel").hidden, "normal working day cleanup expanded Leave / TOIL");
 
@@ -287,37 +289,26 @@
     assert(workConfirmationFor("2026-08-21", {...noWork, leaveType:"Public Holiday", leaveHours:"7:21"})?.title === "Please confirm this public holiday entry", "Public Holiday additional data did not trigger confirmation");
     const recordsBeforeNextDateTests = state.records;
     state.records = {"2026-07-24":clone(noWork)};
-    assert(nextAvailableRecordDate("2026-07-23") === "2026-07-25", "next available date did not skip one saved record");
+    assert(nextAvailableRecordDate("2026-07-23") === "2026-07-27", "next available date did not skip one saved record");
     state.records["2026-07-25"] = clone(noWork);
-    assert(nextAvailableRecordDate("2026-07-23") === "2026-07-26", "next available date did not skip two saved records");
+    assert(nextAvailableRecordDate("2026-07-23") === "2026-07-27", "next available date did not skip two saved records");
     state.records = recordsBeforeNextDateTests;
 
-    // Record Date selection uses the underlying ISO date and the existing confirmation modal.
-    viewStart = periodFor("2026-08-08").start; loadRecord("2026-08-07", true);
-    assert(weekdayForISO("2026-08-07") === 5 && weekdayForISO("2026-08-08") === 6 && weekdayForISO("2026-08-09") === 0 && weekdayForISO("2026-08-10") === 1, "local calendar weekday detection is incorrect");
-    change("recordDate", "2026-08-08");
-    assert(!el("workConfirmationModal").hidden && activeDate === "2026-08-07" && el("recordDate").value === "2026-08-08", "selecting Saturday 08 Aug 2026 did not open the weekend confirmation from the underlying date value");
-    el("cancelSpecialWork").click();
-    assert(activeDate === "2026-08-07" && el("recordDate").value === "2026-08-07" && el("recordDateDisplay").textContent === "07 Aug 2026 Fri", "cancelling Saturday selection did not restore the prior Record Date");
-    change("recordDate", "2026-08-08"); el("confirmSpecialWork").click();
-    assert(activeDate === "2026-08-08" && el("recordDateDisplay").textContent === "08 Aug 2026 Sat", "confirming Saturday selection did not load the weekend date");
-
-    loadRecord("2026-08-07", true); change("recordDate", "2026-08-09");
-    assert(!el("workConfirmationModal").hidden && activeDate === "2026-08-07", "selecting Sunday 09 Aug 2026 did not open the weekend confirmation");
-    el("confirmSpecialWork").click(); assert(activeDate === "2026-08-09", "confirming Sunday selection did not load the weekend date");
-    change("recordDate", "2026-08-10"); assert(el("workConfirmationModal").hidden && activeDate === "2026-08-10", "Monday 10 Aug 2026 incorrectly triggered the weekend confirmation");
-    change("recordDate", "2026-08-07"); assert(el("workConfirmationModal").hidden && activeDate === "2026-08-07", "Friday 07 Aug 2026 incorrectly triggered the weekend confirmation");
-
+    // Manual date selection accepts weekends immediately, without automatic date skipping.
+    loadRecord("2026-08-07", true);
+    assert(weekdayForISO("2026-08-07") === 5 && weekdayForISO("2026-08-08") === 6 && weekdayForISO("2026-08-09") === 0, "local calendar weekday detection is incorrect");
+    for (const date of ["2026-08-08", "2026-08-09", "2026-08-10", "2026-08-07"]) {
+      change("recordDate", date);
+      assert(activeDate === date && el("recordDate").value === date && el("workConfirmationModal").hidden, "manual date selection was restricted or advanced automatically");
+    }
     state.records["2026-08-08"] = clone(working); save(); renderAll();
     el("recordsBody").querySelector('[data-edit="2026-08-08"]').click();
-    assert(!el("workConfirmationModal").hidden && activeDate === "2026-08-07" && !editMode, "editing an existing weekend record bypassed the weekend confirmation");
-    el("confirmSpecialWork").click();
-    assert(activeDate === "2026-08-08" && editMode && el("startTime").value === "09:00", "confirmed weekend History edit did not load the existing record");
+    assert(activeDate === "2026-08-08" && editMode && el("startTime").value === "09:00", "weekend History edit did not keep the selected date");
     el("cancelEdit").click(); delete state.records["2026-08-08"]; save();
     viewStart = periodFor("2026-08-21").start; loadRecord("2026-08-21", true);
 
     // End-to-end Saturday diagnostic and hard-gate test through the real controls and Submit button.
-    change("recordDate", "2026-08-22"); assert(!el("workConfirmationModal").hidden, "Saturday selection warning did not precede Daily Entry"); el("confirmSpecialWork").click(); el("toggleLeaveToil").click(); change("leaveType", "Annual"); change("leaveHours", "721"); el("toggleLeaveToil").click();
+    change("recordDate", "2026-08-22"); assert(activeDate === "2026-08-22" && el("workConfirmationModal").hidden, "manual Saturday selection was not retained"); el("toggleLeaveToil").click(); change("leaveType", "Annual"); change("leaveHours", "721"); el("toggleLeaveToil").click();
     assert(el("leaveToilPanel").hidden && el("leaveType").value === "Annual" && el("leaveHours").value === "7:21", "collapsing Leave / TOIL discarded entered values");
     let candidate = readForm();
     assert(activeDate === "2026-08-22" && DAY_NAMES[new Date(`${activeDate}T00:00:00`).getDay()] === "Saturday", "Saturday Record Date did not reach submit state");
@@ -335,7 +326,7 @@
     assert(state.records["2026-08-22"] === undefined && JSON.parse(localStorage.getItem(STORAGE_KEY)).records["2026-08-22"] === undefined, "Go Back saved the Saturday record");
     el("submitRecord").click(); el("confirmSpecialWork").click();
     assert(Boolean(state.records["2026-08-22"]) && Boolean(JSON.parse(localStorage.getItem(STORAGE_KEY)).records["2026-08-22"]), "Confirm did not save the captured Saturday record");
-    assert(activeDate === "2026-08-23", "confirmed weekend submission did not advance the Record Date");
+    assert(activeDate === "2026-08-24", "automatic date after Saturday submission did not skip Sunday");
     delete state.records["2026-08-22"]; save();
 
     // The same hard gate must hold for Sunday.
@@ -603,55 +594,63 @@
     closeEmailModal();
 
     // Marking an overdue fortnight ends after saving status; export remains an explicit separate action.
-    const overdueStart = "2026-08-06";
-    state.records = {[overdueStart]:clone(exportRecord)}; state.submissions = {}; viewStart = overdueStart; save(); renderAll();
+    const currentReminderPeriod = periodFor(todayISO()).start;
+    const previousReminderPeriod = C.addDays(currentReminderPeriod, -14);
+    const overdueStart = C.addDays(previousReminderPeriod, -14);
+    const reminderFilters = {year:filterYear, month:filterMonth};
+    state.records = {[overdueStart]:clone(exportRecord), [previousReminderPeriod]:clone(exportRecord)};
+    // Isolate two overdue periods, even when today is the current period's final Wednesday.
+    state.submissions = {[currentReminderPeriod]:{submitted:true, changed:false}};
+    filterYear = Number(overdueStart.slice(0, 4)); filterMonth = Number(overdueStart.slice(5, 7));
+    historicalStart = overdueStart; historicalMode = true; save(); renderAll();
     assert(!el("submissionReminder").hidden && reminderStart === overdueStart, "overdue fortnight reminder test setup failed");
-    assert(mainLayout.classList.contains("layout-actionable") && !mainLayout.classList.contains("layout-unified") && getComputedStyle(el("primaryEntryFlow")).backgroundColor === "rgba(0, 0, 0, 0)" && getComputedStyle(el("primaryEntryFlow")).overflow === "visible" && getComputedStyle(el("submissionReminder")).marginTop === "20px" && getComputedStyle(el("dailyEntryCard")).marginTop === "20px" && getComputedStyle(el("dailyEntryCard")).borderTopWidth !== "0px" && getComputedStyle(document.querySelector(".hero"), "::after").content === "none", "actionable reminder did not select the separated hero/reminder/Daily Entry layout");
+    const beforeSubmissionFailure = JSON.stringify(state), beforeSubmissionStorage = localStorage.getItem(STORAGE_KEY), beforeSubmissionMessage = el("status").textContent;
+    const setItemBeforeSubmissionFailure = Storage.prototype.setItem;
+    Storage.prototype.setItem = function(key,value) { if (key === STORAGE_KEY) throw new DOMException("Isolated submission failure", "QuotaExceededError"); return setItemBeforeSubmissionFailure.call(this,key,value); };
+    try { el("markSubmitted").click(); } finally { Storage.prototype.setItem = setItemBeforeSubmissionFailure; }
+    assert(JSON.stringify(state) === beforeSubmissionFailure && localStorage.getItem(STORAGE_KEY) === beforeSubmissionStorage && el("status").textContent === beforeSubmissionMessage, "failed fortnight submission changed stored state or displayed success feedback");
+    assert(mainLayout.classList.contains("layout-actionable") && !mainLayout.classList.contains("layout-unified") && getComputedStyle(el("primaryEntryFlow")).backgroundColor === "rgba(0, 0, 0, 0)" && getComputedStyle(el("primaryEntryFlow")).overflow === "visible" && getComputedStyle(el("submissionReminder")).marginTop === `${20 * visualScale}px` && getComputedStyle(el("dailyEntryCard")).marginTop === `${20 * visualScale}px` && getComputedStyle(el("dailyEntryCard")).borderTopWidth !== "0px" && getComputedStyle(document.querySelector(".hero"), "::after").content === "none", "actionable reminder did not select the separated hero/reminder/Daily Entry layout");
     let exportPromptCount = 0;
     window.confirm = message => { if (/CSV|export|share/i.test(message)) exportPromptCount++; return true; };
     el("markSubmitted").click();
     window.confirm = () => true;
     assert(state.submissions[overdueStart]?.submitted && state.submissions[overdueStart]?.changed === false, "Mark fortnight as submitted did not preserve the existing submission state logic");
+    assert(!el("submissionReminder").hidden && reminderStart === previousReminderPeriod && el("status").textContent === "This fortnight has been submitted. You can no longer edit its entries directly. To make changes, go to Historical Timesheets, select the relevant fortnight, and click Edit Timesheet.", "submitting one period must preserve another outstanding reminder and show success feedback");
+    window.confirm = message => { if (/CSV|export|share/i.test(message)) exportPromptCount++; return true; };
+    el("markSubmitted").click(); window.confirm = () => true;
+    assert(state.submissions[previousReminderPeriod]?.submitted && !state.submissions[previousReminderPeriod].changed, "the remaining overdue period was not marked submitted");
     assert(exportPromptCount === 0, "Mark fortnight as submitted triggered an export/download/share prompt");
-    assert(el("submissionReminder").hidden && el("status").textContent === "Fortnight marked as submitted.", "submitted reminder or success feedback did not update normally");
+    assert(el("submissionReminder").hidden && el("status").textContent === "This fortnight has been submitted. You can no longer edit its entries directly. To make changes, go to Historical Timesheets, select the relevant fortnight, and click Edit Timesheet.", "submitted reminder or success feedback did not update normally");
+    assert(el("status").scrollWidth <= el("status").clientWidth && getComputedStyle(el("status")).whiteSpace === "normal", "long fortnight success message does not wrap within the existing status area");
     assert(mainLayout.classList.contains("layout-unified") && getComputedStyle(el("status")).color === "rgb(104, 72, 168)" && getComputedStyle(el("dailyEntryCard")).marginTop === "0px", "submitted informational status did not return to the unified layout");
+    filterYear = reminderFilters.year; filterMonth = reminderFilters.month;
 
-    // A submitted fortnight warns only on the persisted false -> true changed-state transition.
-    const resubmissionWarning = "This fortnight was previously submitted. The saved record has changed and the fortnight may need to be resubmitted.";
-    const resubmissionWarningCount = () => alerts.filter(message => message === resubmissionWarning).length;
-    const workdayRecord = (finishTime = "16:51") => ({...emptyRecord("Flextime"), startTime:"09:00", lunchOut:"12:00", lunchIn:"12:30", finishTime});
-    const submitWorkday = (date, finishTime = "16:51", mode = "new") => {
-      loadRecord(date, true, mode);
-      input("startTime", "0900"); input("lunchOut", "1200"); input("lunchIn", "1230"); input("finishTime", finishTime.replace(":", ""));
-      el("submitRecord").click();
+    const authoriseHistoricalPeriod = start => {
+      change("filterYear", start.slice(0, 4)); change("filterMonth", String(Number(start.slice(5, 7)))); change("viewFortnight", start);
+      el("editHistoricalTimesheet").click(); el("confirmHistoricalEdit").click();
+      assert(historicalEditAllowed(start), "historical permission was not granted through confirmation");
     };
-    const submittedFortnightA = "2026-08-20", submittedFortnightB = "2026-09-03";
-    state.records = {}; state.submissions = {[submittedFortnightA]:{submitted:true, changed:false, submittedAt:"2026-08-20T00:00:00.000Z"}}; viewStart = submittedFortnightA; save();
-    const warningsBeforeSequence = resubmissionWarningCount();
-    submitWorkday("2026-08-24");
-    assert(resubmissionWarningCount() === warningsBeforeSequence + 1 && state.submissions[submittedFortnightA].changed, "Day 1 did not show exactly one resubmission warning and enter changed state");
-    assert(JSON.parse(localStorage.getItem(STORAGE_KEY)).submissions[submittedFortnightA].changed, "changed/acknowledged state was not persisted after Day 1");
-    submitWorkday("2026-08-25");
-    submitWorkday("2026-08-26");
-    submitWorkday("2026-08-24", "17:01", "edit");
-    assert(resubmissionWarningCount() === warningsBeforeSequence + 1, "Day 2, Day 3, or the second Day 1 edit repeated the resubmission warning");
-
-    state = load(); renderSettings(); viewStart = submittedFortnightA;
-    submitWorkday("2026-08-25", "17:11", "edit");
-    assert(state.submissions[submittedFortnightA].changed && resubmissionWarningCount() === warningsBeforeSequence + 1, "refresh/reload lost the acknowledged needs-resubmission state");
-    renderAll();
-    assert(reminderStart === submittedFortnightA, "changed submitted fortnight was not available to mark as submitted again");
-    el("markSubmitted").click();
-    assert(state.submissions[submittedFortnightA].submitted && !state.submissions[submittedFortnightA].changed, "explicit resubmission did not reset the changed transition state");
-    submitWorkday("2026-08-26", "17:21", "edit");
-    assert(resubmissionWarningCount() === warningsBeforeSequence + 2 && state.submissions[submittedFortnightA].changed, "first change after explicit resubmission did not warn again exactly once");
-    submitWorkday("2026-08-25", "17:31", "edit");
-    assert(resubmissionWarningCount() === warningsBeforeSequence + 2, "second change after explicit resubmission repeated the warning");
-
-    state.records["2026-09-07"] = workdayRecord(); state.submissions[submittedFortnightB] = {submitted:true, changed:false, submittedAt:"2026-09-03T00:00:00.000Z"}; save();
-    submitWorkday("2026-09-07", "17:01", "edit");
-    assert(resubmissionWarningCount() === warningsBeforeSequence + 3 && state.submissions[submittedFortnightB].changed, "Fortnight A acknowledgement suppressed Fortnight B's first warning");
-
+    const assertPeriodBadges = expected => {
+      const badges = [el("dailyEntryStatus"), el("fortnightStatus"), el("calculatedDateStatus")];
+      assert(badges.every(badge => badge.textContent === expected), `all three period badges must show ${expected}`);
+      const styles = badges.map(badge => getComputedStyle(badge)), rects = badges.map(badge => badge.getBoundingClientRect());
+      assert(styles.every(style => ["fontFamily","fontSize","fontWeight","color","backgroundColor","border","borderRadius","padding","lineHeight"].every(key => styles[0][key] === style[key])), "period badges do not share the existing styling");
+      assert(rects.every(rect => Math.abs(rects[0].width - rect.width) < .02 && Math.abs(rects[0].height - rect.height) < .02), "period badge dimensions differ");
+      const heading = el("dailyEntryStatus").previousElementSibling.getBoundingClientRect();
+      assert(rects[0].left > heading.right && Math.abs((rects[0].top + rects[0].bottom) / 2 - (heading.top + heading.bottom) / 2) < .02 && rects[0].right <= el("dailyEntryCard").getBoundingClientRect().right, "Daily Entry badge overlaps, wraps or misaligns");
+      const calculatedHeading = el("calculatedDateStatus").previousElementSibling.getBoundingClientRect();
+      assert(rects[2].left > calculatedHeading.right && Math.abs((rects[2].top + rects[2].bottom) / 2 - (calculatedHeading.top + calculatedHeading.bottom) / 2) < .02, "Calculated badge must remain beside its naturally wrapping heading");
+    };
+    const assertHistoricalReminder = active => {
+      assert(el("resubmitHistoricalReminder").hidden === !active && el("resubmitHistoricalTimesheet").hidden === !active, "historical Resubmit controls do not share the active-session state");
+      if (active) {
+        assert(!el("submissionReminder").hidden && el("markSubmitted").hidden && el("submissionMessage").textContent === "Historical timesheet awaiting resubmission" && el("submissionPeriod").textContent === "You are editing a previously submitted fortnight. Please resubmit it when you have finished making changes.", "historical reminder wording, placement or submission type is incorrect");
+        const upper = getComputedStyle(el("resubmitHistoricalReminder")), lower = getComputedStyle(el("resubmitHistoricalTimesheet"));
+        assert(["backgroundColor","color","fontFamily","fontSize","fontWeight","borderRadius"].every(key => upper[key] === lower[key]), "upper Resubmit styling differs from existing primary button");
+        const rect = el("submissionReminder").getBoundingClientRect();
+        assert(rect.left >= 0 && rect.right <= innerWidth && el("resubmitHistoricalReminder").scrollWidth <= el("resubmitHistoricalReminder").clientWidth, "historical reminder overflows");
+      }
+    };
     // Destructive history reset preserves Settings but removes every historical source of balances.
     state.settings.attendanceType = "Flextime";
     state.settings.openingFlex = "10:00";
@@ -705,7 +704,382 @@
     if (innerWidth > 600) assert(new Set(settingsInputTopsWithError).size === 1, "Settings inputs moved out of alignment when the fortnight validation message appeared");
     assert(el("fortnightStartError").getBoundingClientRect().top >= el("fortnightStart").getBoundingClientRect().bottom, "Fortnight validation message is not below its date input");
     assert(document.documentElement.scrollWidth <= document.documentElement.clientWidth, "Settings validation layout introduced horizontal overflow");
-    if (innerWidth <= 600) assert(Math.round(parseFloat(getComputedStyle(el("fortnightStart")).height)) === 48, "mobile Fortnight Start Date is not 48px high");
+    if (innerWidth <= 600) assert(Math.round(parseFloat(getComputedStyle(el("fortnightStart")).height)) === Math.round(48 * visualScale), "mobile Fortnight Start Date does not follow the visual scale");
+
+    // Daily Entry owns its date and draft; historical browsing owns a separate period.
+    state = clone(defaults); state.settings.fortnightStart = "2026-09-24"; state.settings.openingFlex = "1:00";
+    const displayPeriods = [
+      {start:"2026-09-24", end:"2026-10-07", finish:"16:51", hours:"14:42", closing:"1:00"},
+      {start:"2026-10-08", end:"2026-10-21", finish:"17:51", hours:"16:42", closing:"3:00"},
+      {start:"2026-10-22", end:"2026-11-04", finish:"15:51", hours:"12:42", closing:"1:00"}
+    ];
+    displayPeriods.forEach(period => [period.start, period.end].forEach(date => { state.records[date] = {...exportRecord, finishTime:period.finish}; }));
+    save(); renderSettings(); loadRecord("2026-09-24", true);
+    const storedBeforeBrowsing = localStorage.getItem(STORAGE_KEY), recordsBeforeBrowsing = JSON.stringify(state.records);
+    function assertDisplayedPeriod(period) {
+      assert(viewStart === period.start && el("periodDates").textContent === `${formatDisplayDate(period.start, "range")} to ${formatDisplayDate(period.end, "range")}`, "summary is displaying a stale reporting period");
+      assert([...el("recordsBody").querySelectorAll("[data-edit]")].map(button => button.dataset.edit).join("|") === `${period.start}|${period.end}`, "Timesheet History is displaying records from another period");
+      assert(metric("fortnightResults", "Hours Recorded This Period") === period.hours && metric("fortnightResults", "Closing Flex Balance") === period.closing, "fortnight totals or carried balances did not follow the selected period");
+      assert(metric("fortnightResults", "Standard Hours") === "73:30", "selected fortnight does not contain ten standard workdays");
+    }
+    for (const period of [...displayPeriods, displayPeriods[0]]) {
+      change("recordDate", period.start); assertDisplayedPeriod(period);
+      assert(activeDate === period.start && !el("recordDate").min && !el("recordDate").max, "Daily Entry date remains restricted to the previously displayed fortnight");
+    }
+    loadRecord("2026-10-08", true, "edit"); input("finishTime", "1851");
+    el("toggleInterruptions").click(); interruptionInput(0, "out", "1030");
+    const dailySnapshot = () => JSON.stringify({date:activeDate, inputDate:el("recordDate").value, draft, originalDraft, form:readForm(), editMode, leaveToil:!el("leaveToilPanel").hidden, interruptions:[...document.querySelectorAll("[data-interruption-time]")].map(input => input.value)});
+    const entryBeforeBrowsing = dailySnapshot();
+    let browsingConfirmations = 0; window.confirm = () => { browsingConfirmations++; return false; };
+    change("filterYear", "2026"); change("filterMonth", "10");
+    for (const period of displayPeriods) {
+      change("viewFortnight", period.start); assertDisplayedPeriod(period);
+      assert(dailySnapshot() === entryBeforeBrowsing, "historical browsing changed Daily Entry or its open unsaved editor");
+      renderAll(); renderCurrentPreview(); assertDisplayedPeriod(period);
+    }
+    assert(browsingConfirmations === 0, "historical browsing incorrectly requested permission to discard Daily Entry");
+    assert(localStorage.getItem(STORAGE_KEY) === storedBeforeBrowsing && JSON.stringify(state.records) === recordsBeforeBrowsing, "date selection or browsing modified stored records");
+    change("recordDate", "2026-09-24");
+    assert(activeDate === "2026-10-08" && dailySnapshot() === entryBeforeBrowsing && viewStart === "2026-10-22", "cancelling a Daily Entry date change lost the draft or changed the viewed period");
+    window.confirm = () => true;
+    change("recordDate", "2026-09-24"); assertDisplayedPeriod(displayPeriods[0]);
+    assert(historicalStart === "2026-10-22" && el("viewFortnight").value === "2026-10-22", "Daily Entry selection replaced the independent historical period");
+    // Historical exports remain tied to that selector even after returning to Daily Entry.
+    let browsingExport;
+    const originalBrowsingDownload = downloadCsvPackage;
+    try {
+      downloadCsvPackage = pkg => { browsingExport = pkg; };
+      el("exportCsv").click(); assert(browsingExport.period.start === "2026-09-24", "Timesheet History export ignored the displayed Daily Entry period");
+      el("exportSelectedFortnight").click(); assert(browsingExport.period.start === "2026-10-22" && browsingExport.rows[1][0] === "22-10-2026" && browsingExport.rows.at(-1)[0] === "04-11-2026", "historical export used the Daily Entry period instead of its independent selection");
+    } finally { downloadCsvPackage = originalBrowsingDownload; }
+
+    // Exercise the real period selectors and download actions across the October DST boundary.
+    state = clone(defaults); state.settings.fortnightStart = "2026-09-24";
+    const csvDateAt = (start, offset) => {
+      const date = new Date(`${start}T00:00:00Z`); date.setUTCDate(date.getUTCDate() + offset);
+      return date.toISOString().slice(0, 10);
+    };
+    for (let offset = 0; offset < 44; offset++) {
+      const date = csvDateAt("2026-09-23", offset);
+      if (date !== "2026-10-10") state.records[date] = {...exportRecord, startTime:`09:${String(offset).padStart(2, "0")}`};
+    }
+    state.records["2025-10-09"] = {...exportRecord}; state.records["2025-10-22"] = {...exportRecord};
+    const exportStateBefore = JSON.stringify(state);
+    renderSettings(); loadRecord("2026-10-08", true);
+    const csvDailyDate = activeDate;
+    change("filterYear", "2026"); change("filterMonth", "10");
+    assert([...el("viewFortnight").options].map(option => option.value).join("|") === "2026-09-24|2026-10-08|2026-10-22", "October selector lost its Thursday reporting-period boundaries");
+    const expectedCsvHeaders = "Date|Start Time|Morning Out|Morning In|Lunch Out|Lunch In|Afternoon Out|Afternoon In|Finish Time|Leave Type|Leave Hours|Standard Hours|Attendance Type|TOIL Hours|Daily Hours";
+    function assertPeriodCsv(pkg, start, end) {
+      assert(pkg.period.start === start && pkg.period.end === end && pkg.filename === `Timesheet_${start}_to_${end}.csv`, "CSV filename and selected period disagree");
+      assert(pkg.rows.length === 15 && pkg.rows[0].join("|") === expectedCsvHeaders, "single-period CSV headers or row count changed");
+      const serializedRows = pkg.csv.split("\r\n").slice(1);
+      assert(serializedRows.length === 14, "serialized CSV does not contain exactly 14 dates");
+      pkg.rows.slice(1).forEach((row, index) => {
+        const date = csvDateAt(start, index), formatted = date.split("-").reverse().join("-");
+        assert(date >= start && date <= end && row[0] === formatted && row.length === 15, `exported row ${index + 1} is outside ${start} to ${end} or has changed columns`);
+        assert(serializedRows[index].startsWith(`"${formatted}",`), "serialized CSV date differs from its selected period");
+        const record = state.records[date];
+        assert(record ? row[1] === record.startTime : row.slice(1).every(value => value === ""), `CSV picked up a record from the wrong date: ${date}`);
+      });
+      assert(pkg.rows[1][0] === start.split("-").reverse().join("-") && pkg.rows.at(-1)[0] === end.split("-").reverse().join("-"), "first or last selected date is missing from CSV");
+    }
+    let capturedCsv;
+    const originalSingleDownload = downloadCsvPackage, originalMultipleDownload = downloadMultiplePeriodsCsv;
+    downloadCsvPackage = pkg => { capturedCsv = pkg; };
+    downloadMultiplePeriodsCsv = pkg => { capturedCsv = pkg; };
+    try {
+      for (const [start, end] of [["2026-09-24", "2026-10-07"], ["2026-10-08", "2026-10-21"], ["2026-10-22", "2026-11-04"]]) {
+        change("viewFortnight", start);
+        assert(viewStart === start && historicalStart === start && activeDate === csvDailyDate, "historical period selection changed Daily Entry or displayed the wrong period");
+        for (const button of ["exportCsv", "exportSelectedFortnight"]) {
+          capturedCsv = null; el(button).click(); assert(capturedCsv, `${button} did not generate a CSV`);
+          assertPeriodCsv(capturedCsv, start, end);
+        }
+        const bytes = new Uint8Array(await capturedCsv.blob.arrayBuffer());
+        assert(bytes.slice(0, 3).join() === "239,187,191" && new TextDecoder().decode(bytes) === capturedCsv.csv, "CSV download encoding or contents changed");
+      }
+      assertPeriodCsv(buildCsvPackage("2026-10-15"), "2026-10-08", "2026-10-21");
+      change("filterYear", "2025"); change("filterMonth", "10"); change("viewFortnight", "2025-10-09");
+      el("exportSelectedFortnight").click(); assertPeriodCsv(capturedCsv, "2025-10-09", "2025-10-22");
+      const multiPeriodCases = [
+        ["30 09 2026", "01 11 2026", ["2026-09-24", "2026-10-08", "2026-10-22"]],
+        ["08 10 2026", "21 10 2026", ["2026-10-08"]]
+      ];
+      for (const [from, to, expectedStarts] of multiPeriodCases) {
+        input("exportPeriodFrom", from); input("exportPeriodTo", to);
+        capturedCsv = null; el("exportMultiplePeriods").click();
+        assert(capturedCsv && capturedCsv.periods.map(period => period.start).join("|") === expectedStarts.join("|"), "multiple-period export selected incorrect periods");
+        assert(capturedCsv.rows[0].join("|") === `Reporting Period|${expectedCsvHeaders}`, "multiple-period CSV column structure changed");
+        expectedStarts.forEach(start => {
+          const end = csvDateAt(start, 13), label = `${start.split("-").reverse().join("-")} to ${end.split("-").reverse().join("-")}`;
+          const rows = capturedCsv.rows.filter(row => row[0] === label);
+          assert(rows.length === 14, `multiple-period export omitted or duplicated dates for ${label}`);
+          const pkg = buildCsvPackage(start); assertPeriodCsv(pkg, start, end);
+          rows.forEach((row, index) => assert(JSON.stringify(row.slice(1)) === JSON.stringify(pkg.rows[index + 1]), `reporting-period label does not match the exported data: ${label}`));
+        });
+        assert(capturedCsv.rows.length === expectedStarts.length * 15 && capturedCsv.rows.filter(row => !row.length).length === expectedStarts.length - 1, "multiple-period export contains extra rows or incorrect separators");
+      }
+      assert(JSON.stringify(state) === exportStateBefore, "period selection or CSV export modified saved timesheet data");
+    } finally {
+      downloadCsvPackage = originalSingleDownload; downloadMultiplePeriodsCsv = originalMultipleDownload;
+    }
+    // Startup and new-entry defaults use record chronology, never the last viewed date or today's date.
+    revokeHistoricalEdit();
+    for (const [latest, expected] of [["2026-10-09","2026-10-12"], ["2026-10-06","2026-10-07"], ["2026-10-08","2026-10-09"], ["2026-10-10","2026-10-12"], ["2026-10-11","2026-10-12"], ["2026-10-02","2026-10-05"], ["2026-12-31","2027-01-01"]]) {
+      state = clone(defaults); state.settings.fortnightStart = "2026-09-24"; state.records[latest] = {...exportRecord};
+      const beforeDefault = JSON.stringify(state);
+      assert(defaultRecordDate() === expected && initialRecordDate() === expected, `automatic default after ${latest} must be ${expected}`);
+      renderSettings(); loadRecord(initialRecordDate(), true); renderAll(); renderAll();
+      assert(activeDate === expected && JSON.stringify(state) === beforeDefault, "default selection or re-render changed records or advanced repeatedly");
+    }
+    state.records = {"2026-10-06":{...exportRecord}}; state.drafts = {"2026-10-09":{record:{...exportRecord}, editMode:false}};
+    assert(defaultRecordDate() === "2026-10-12", "a saved draft's Record Date was omitted from the latest-entry calculation");
+    state.activeDraftDate = "2026-10-09";
+    assert(initialRecordDate() === "2026-10-09", "startup abandoned an unfinished saved draft");
+    state.drafts = {}; state.activeDraftDate = "";
+    loadRecord("2026-10-05", true);
+    for (let offset = 0; offset < 7; offset++) {
+      const date = C.addDays("2026-10-05", offset); change("recordDate", date); renderAll();
+      assert(activeDate === date && el("recordDate").value === date && !el("recordDate").min && !el("recordDate").max && el("workConfirmationModal").hidden, "one of the seven manually selected weekdays was restricted or redirected");
+    }
+    input("startTime", "0900"); const manualDate = activeDate, manualState = JSON.stringify(state);
+    window.confirm = () => false; change("recordDate", "2026-10-12");
+    assert(activeDate === manualDate && el("startTime").value === "09:00", "declining a date change discarded unsaved work");
+    window.confirm = () => true; change("filterYear", "2025"); change("filterMonth", "1"); renderAll();
+    assert(activeDate === manualDate && el("startTime").value === "09:00" && JSON.stringify(state) === manualState, "historical browsing recalculated the default date or overwrote Daily Entry");
+    state.submissions = {"2026-10-08":{submitted:true, changed:false}};
+    change("recordDate", "2026-10-10");
+    assert(activeDate === "2026-10-10" && submittedPeriodLocked() && !el("startTime").readOnly && !el("submitRecord").disabled, "manual Saturday selection bypassed the submitted-period lock");
+    change("recordDate", "2026-10-11");
+    assert(activeDate === "2026-10-11" && submittedPeriodLocked() && !el("saveDraft").disabled, "manual Sunday selection bypassed the submitted-period lock");
+    // Every explicit unauthorised Save/Submit click warns before validation, even for empty/unchanged forms.
+    revokeHistoricalEdit(); state = clone(defaults); state.settings.fortnightStart = "2026-09-24";
+    state.records = {"2026-10-07":{...exportRecord, finishTime:"17:21"}, "2026-10-08":{...exportRecord}, "2026-11-05":{...exportRecord}};
+    state.submissions = {"2026-10-08":{submitted:true, changed:false}};
+    save(); renderSettings(); loadRecord("2026-10-08", true);
+    assertPeriodBadges("Submitted"); assertHistoricalReminder(false);
+    const modalStateBefore = JSON.stringify(state), modalStoredBefore = localStorage.getItem(STORAGE_KEY);
+    assert(el("submittedWarningModal").hidden, "selecting or viewing a submitted record opened the warning");
+    function assertSubmittedWarning(trigger) {
+      const selectedDate = activeDate, temporaryValues = JSON.stringify(readForm()), alertsBeforeClick = alerts.length;
+      const clockValidation = validateClockInputs, durationValidation = validateDurationInputs;
+      let validations = 0, writes = 0;
+      const originalSetItem = Storage.prototype.setItem;
+      validateClockInputs = (...args) => { validations++; return clockValidation(...args); };
+      validateDurationInputs = (...args) => { validations++; return durationValidation(...args); };
+      Storage.prototype.setItem = function(key,value) { if (key === STORAGE_KEY) writes++; return originalSetItem.call(this,key,value); };
+      try { el(trigger).focus(); el(trigger).click(); } finally { validateClockInputs = clockValidation; validateDurationInputs = durationValidation; Storage.prototype.setItem = originalSetItem; }
+      assert(validations === 0 && writes === 0 && alerts.length === alertsBeforeClick, "submitted protection did not precede ordinary validation or attempted a data write");
+      assert(!el("submittedWarningModal").hidden && document.activeElement === el("dismissSubmittedWarning") && document.querySelector("main").inert, "submitted warning did not open accessibly after a Save/Submit attempt");
+      assert(el("submittedWarningTitle").textContent === "You CANNOT edit a submitted timesheet" && el("dismissSubmittedWarning").textContent === "OK, Got It", "submitted warning title or button wording changed");
+      assert([...el("submittedWarningMessage").querySelectorAll("p")].map(p => p.textContent).join("\n\n") === "This fortnight has already been submitted. You cannot make changes to a submitted timesheet.\n\nTo make changes, go to Historical Timesheets, select the relevant fortnight, and click Edit Timesheet.", "submitted warning message changed");
+      const rect = el("submittedWarningModal").querySelector(".dialog-card").getBoundingClientRect();
+      assert(Math.abs((rect.left + rect.right) / 2 - innerWidth / 2) < 1 && Math.abs((rect.top + rect.bottom) / 2 - innerHeight / 2) < 1 && rect.width <= innerWidth && rect.height <= innerHeight, "submitted warning must stay centred and fit the viewport");
+      const ok = el("dismissSubmittedWarning").getBoundingClientRect();
+      assert(getComputedStyle(el("submittedWarningModal")).display !== "none" && document.elementFromPoint(ok.left + ok.width / 2, ok.top + ok.height / 2) === el("dismissSubmittedWarning"), "submitted modal is obscured, clipped or behind page content");
+      el("dismissSubmittedWarning").dispatchEvent(new KeyboardEvent("keydown", {key:"Tab", bubbles:true, cancelable:true}));
+      assert(document.activeElement === el("dismissSubmittedWarning"), "focus escaped the submitted warning");
+      assert(JSON.stringify(state) === modalStateBefore && localStorage.getItem(STORAGE_KEY) === modalStoredBefore, "blocked Save/Submit wrote submitted data");
+      el("dismissSubmittedWarning").click();
+      assert(el("submittedWarningModal").hidden && !document.querySelector("main").inert && document.activeElement === el(trigger) && activeDate === selectedDate && JSON.stringify(readForm()) === temporaryValues, "dismissal failed to restore focus or changed the selected date or temporary input");
+    }
+    loadRecord("2026-10-15", true);
+    assertPeriodBadges("Submitted");
+    assert(["startTime","lunchOut","lunchIn","finishTime"].every(id => el(id).value === "") && el("submittedWarningModal").hidden, "empty submitted-date fixture did not load silently");
+    for (const id of ["saveDraft","submitRecord"]) assertSubmittedWarning(id);
+    input("startTime", "0900"); input("lunchOut", "1200"); input("lunchIn", "1300"); input("finishTime", "1700");
+    for (const id of ["saveDraft","submitRecord"]) assertSubmittedWarning(id);
+    input("finishTime", "2500");
+    for (const id of ["saveDraft","submitRecord"]) assertSubmittedWarning(id);
+    input("finishTime", ""); input("lunchIn", "");
+    for (const id of ["saveDraft","submitRecord"]) assertSubmittedWarning(id);
+    loadRecord("2026-10-08", true);
+    assert(!meaningfulDailyChanges() && el("submittedWarningModal").hidden, "viewing unchanged submitted records opened a warning");
+    for (const id of ["saveDraft","submitRecord"]) assertSubmittedWarning(id);
+    el("startTime").focus(); input("startTime", "0900");
+    assert(!meaningfulDailyChanges() && el("submittedWarningModal").hidden, "focus or equivalent formatting counted as a modification or opened the modal");
+    assertSubmittedWarning("saveDraft");
+    el("toggleInterruptions").click(); assertSubmittedWarning("saveDraft"); closeInterruptionEditor();
+    input("finishTime", "1751"); assertSubmittedWarning("saveDraft");
+    assert(el("finishTime").value === "17:51", "dismissing Save warning lost temporary hours");
+    assertSubmittedWarning("submitRecord");
+    assert(el("finishTime").value === "17:51", "dismissing Submit warning lost temporary hours");
+    input("finishTime", "1651"); assertSubmittedWarning("submitRecord");
+    el("toggleInterruptions").click(); interruptionInput(0, "out", "1030"); interruptionInput(0, "in", "1045");
+    assertSubmittedWarning("saveDraft");
+    assert(interruptionEditor().querySelector("[data-interruption-out]").value === "10:30", "warning discarded temporary additional time");
+    closeInterruptionEditor(); setLeaveToilExpanded(true); change("leaveType", "Annual"); input("leaveHours", "100");
+    assertSubmittedWarning("submitRecord");
+    assert(el("leaveType").value === "Annual" && el("leaveHours").value === "100", "warning discarded temporary leave details");
+    cancelLeaveToil(); clearRecordForm(); assertSubmittedWarning("saveDraft");
+    copyPrevious(); assertSubmittedWarning("submitRecord");
+    assert(JSON.stringify(state) === modalStateBefore && localStorage.getItem(STORAGE_KEY) === modalStoredBefore, "Clear or Copy Previous bypassed persistence protection");
+    loadRecord("2026-10-08", true); change("recordDate", "2026-10-09");
+    assert(el("submittedWarningModal").hidden && activeDate === "2026-10-09", "navigating unchanged submitted data opened a warning");
+    assert(!el("submittedPeriodNotice") && !el("status").textContent.includes("This fortnight has already been submitted."), "removed inline submitted warning returned");
+
+    // Submitted historical edits are an isolated transaction until successful resubmission.
+    setHistoricalExpanded(true);
+    revokeHistoricalEdit(); state = clone(defaults); state.settings.fortnightStart = "2026-09-24";
+    state.records = {"2026-10-08":clone(exportRecord), "2026-10-21":clone(exportRecord), "2026-10-22":clone(exportRecord), "2026-11-05":clone(exportRecord)};
+    state.submissions = {"2026-10-08":{submitted:true, changed:false, submittedAt:"original", note:"preserve"}, "2026-10-22":{submitted:true, changed:false}};
+    save(); renderSettings(); loadRecord("2026-10-08", true);
+    const transactionState = JSON.stringify(state), transactionStorage = localStorage.getItem(STORAGE_KEY);
+    const approvedCsv = buildCsvPackage("2026-10-08").csv;
+    change("filterYear", "2026"); change("filterMonth", "10"); change("viewFortnight", "2026-10-08");
+    el("editHistoricalTimesheet").click();
+    assert(!el("historicalEditModal").hidden && !historicalSession && el("resubmitHistoricalTimesheet").hidden, "historical permission activated before confirmation");
+    assertPeriodBadges("Submitted"); assertHistoricalReminder(false);
+    el("cancelHistoricalEdit").click();
+    assert(!historicalSession && submittedPeriodLocked() && JSON.stringify(state) === transactionState, "initial Cancel changed submitted data or permission");
+    assertPeriodBadges("Submitted"); assertHistoricalReminder(false);
+    authoriseHistoricalPeriod("2026-10-08");
+    assertPeriodBadges("To be submitted"); assertHistoricalReminder(true);
+    assert(historicalSession && !submittedPeriodLocked() && !el("resubmitHistoricalTimesheet").hidden && !el("cancelHistoricalSession").hidden, "confirmed submitted period did not enter transactional editing");
+    const entryActions = [...document.querySelectorAll(".daily-entry-actions > button")].filter(button => !button.hidden);
+    assert(entryActions.map(button => button.textContent).join("|") === "Save Changes|Save|Copy Previous|Clear|Cancel Edit", "wrapping changed the Daily Entry action order");
+    assert(entryActions.every(button => button.getBoundingClientRect().right <= el("dailyEntryCard").getBoundingClientRect().right) && document.documentElement.scrollWidth <= document.documentElement.clientWidth, "historical Cancel Edit or heading causes horizontal page overflow");
+    const actionButtons = [...document.querySelectorAll(".historical-actions > button")];
+    const visualButtons = [...actionButtons].sort((a,b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top || a.getBoundingClientRect().left - b.getBoundingClientRect().left);
+    assert(visualButtons.map(button => button.textContent.trim()).join("|") === (innerWidth <= 600 ? "Edit Timesheet|Export|Resubmit|Cancel" : "Edit Timesheet|Resubmit|Export|Cancel"), "historical action visual order is incorrect");
+    const actionRects = actionButtons.map(button => button.getBoundingClientRect()), actionStyles = actionButtons.map(button => getComputedStyle(button));
+    assert(actionRects.every(rect => Math.abs(rect.height - actionRects[0].height) < .02), "historical actions have unequal heights");
+    assert(actionStyles.every(style => ["fontSize","fontWeight","lineHeight","borderRadius"].every(key => style[key] === actionStyles[0][key])), "historical action typography or corners differ");
+    assert(["backgroundColor","color","padding"].every(key => actionStyles[0][key] === actionStyles[1][key] && actionStyles[2][key] === actionStyles[3][key]), "historical action colour/style pairs do not match exactly");
+    if (innerWidth <= 600) {
+      assert(actionRects.every(rect => Math.abs(rect.width - actionRects[0].width) < .02) && actionRects[0].top === actionRects[2].top && actionRects[1].top === actionRects[3].top && actionRects[1].top > actionRects[0].top, "mobile historical actions are not an equal 2 by 2 grid");
+    } else {
+      assert(actionRects.every(rect => rect.top === actionRects[0].top) && Math.abs(actionRects[0].left - el("filterYear").getBoundingClientRect().left) < .02 && actionRects.at(-1).right <= document.querySelector(".historical-actions").getBoundingClientRect().right, "desktop/tablet historical actions wrap, stretch or misalign");
+    }
+    input("finishTime", "1751"); el("saveDraft").click();
+    assert(el("status").textContent === "Draft saved" && historicalSession.records["2026-10-08"].finishTime === "17:51", "historical Save did not stage the draft or preserve success feedback");
+    assert(JSON.stringify(state) === transactionState && localStorage.getItem(STORAGE_KEY) === transactionStorage && buildCsvPackage("2026-10-08").csv === approvedCsv, "historical Save changed persisted records, status or approved export");
+    const unload = new Event("beforeunload", {cancelable:true}); window.dispatchEvent(unload);
+    assert(unload.defaultPrevented, "staged historical changes lack reload protection");
+    change("recordDate", "2026-10-21"); input("finishTime", "1721"); el("submitRecord").click();
+    assert(historicalSession.records["2026-10-21"].finishTime === "17:21" && JSON.stringify(state) === transactionState && localStorage.getItem(STORAGE_KEY) === transactionStorage, "historical Submit wrote records before Resubmit");
+    assert(C.recalculate(editableRecords(), state.settings)["2026-10-21"].progressiveFlex === C.recalculate(state.records, state.settings)["2026-10-21"].progressiveFlex + 90, "historical working balance did not recalculate using existing logic");
+    el("cancelHistoricalSession").click();
+    assert(!el("historicalDiscardModal").hidden && el("historicalDiscardTitle").textContent === "Discard historical changes?" && el("historicalDiscardMessage").textContent === "Any changes made during this editing session will be discarded. The timesheet will remain submitted and locked.", "historical discard confirmation is missing or has incorrect wording");
+    const discardRect = el("historicalDiscardModal").querySelector(".dialog-card").getBoundingClientRect();
+    assert(document.activeElement === el("keepHistoricalChanges") && document.querySelector("main").inert && discardRect.left >= 0 && discardRect.right <= innerWidth && discardRect.height <= innerHeight, "historical discard dialog focus or responsive bounds are incorrect");
+    el("keepHistoricalChanges").click();
+    assertPeriodBadges("To be submitted"); assertHistoricalReminder(true);
+    assert(historicalSession && historicalSession.records["2026-10-08"].finishTime === "17:51" && el("historicalDiscardModal").hidden, "Keep Editing discarded working changes");
+    el("cancelHistoricalSession").click(); el("discardHistoricalChanges").click();
+    assertPeriodBadges("Submitted"); assertHistoricalReminder(false);
+    assert(!historicalSession && !historicalEditAuthorization && submittedPeriodLocked() && el("resubmitHistoricalTimesheet").hidden && el("cancelHistoricalSession").hidden && JSON.stringify(state) === transactionState && localStorage.getItem(STORAGE_KEY) === transactionStorage, "Cancel failed to restore original submitted data and revoke permission");
+    assert(!el("status").textContent.includes("This fortnight has already been submitted."), "Cancel restored removed inline warning");
+    authoriseHistoricalPeriod("2026-10-08");
+    input("finishTime", "1751"); el("saveDraft").click();
+    input("finishTime", "2500"); el("resubmitHistoricalReminder").click();
+    assertPeriodBadges("To be submitted"); assertHistoricalReminder(true);
+    assert(historicalSession && localStorage.getItem(STORAGE_KEY) === transactionStorage && el("finishTime").value.replace(":", "") === "2500", "failed validation wrote data or lost historical input/permission");
+    input("finishTime", "1751");
+    const storageSetBeforeFailure = Storage.prototype.setItem;
+    Storage.prototype.setItem = function(key,value) { if (key === STORAGE_KEY) throw new DOMException("Isolated quota failure", "QuotaExceededError"); return storageSetBeforeFailure.call(this,key,value); };
+    try { el("resubmitHistoricalReminder").click(); } finally { Storage.prototype.setItem = storageSetBeforeFailure; }
+    assertPeriodBadges("To be submitted"); assertHistoricalReminder(true);
+    assert(historicalSession && historicalEditAllowed(activeDate) && JSON.stringify(state) === transactionState && localStorage.getItem(STORAGE_KEY) === transactionStorage && el("status").textContent.includes("could not be saved"), "storage failure caused a partial write, false success or lost permission");
+    localStorage.setItem(STORAGE_KEY, transactionStorage + " "); el("resubmitHistoricalTimesheet").click();
+    assert(historicalSession && el("status").textContent.includes("changed after editing began") && localStorage.getItem(STORAGE_KEY) === transactionStorage + " ", "external storage conflict was overwritten");
+    localStorage.setItem(STORAGE_KEY, transactionStorage);
+    deleteRecord("2026-10-21");
+    assert(!editableRecords()["2026-10-21"] && state.records["2026-10-21"] && localStorage.getItem(STORAGE_KEY) === transactionStorage, "historical deletion changed the submitted record before resubmission");
+    const oldPermission = historicalEditAuthorization.id;
+    const setItem = Storage.prototype.setItem; let historicalWrites = 0;
+    Storage.prototype.setItem = function(key,value) { if (key === STORAGE_KEY) historicalWrites++; return setItem.call(this,key,value); };
+    try { el("resubmitHistoricalTimesheet").click(); } finally { Storage.prototype.setItem = setItem; }
+    assert(historicalWrites === 1 && !historicalSession && !historicalEditAuthorization && submittedPeriodLocked(), "successful resubmission was not one atomic write followed by relocking");
+    assertPeriodBadges("Submitted"); assertHistoricalReminder(false);
+    const afterHistoricalStorage = localStorage.getItem(STORAGE_KEY);
+    for (const trigger of ["saveDraft","submitRecord"]) {
+      el(trigger).click();
+      assert(!el("submittedWarningModal").hidden && localStorage.getItem(STORAGE_KEY) === afterHistoricalStorage, "ordinary Save/Submit protection did not resume after historical resubmission");
+      el("dismissSubmittedWarning").click();
+    }
+    assert(state.records["2026-10-08"].finishTime === "17:51" && !state.records["2026-10-21"] && state.submissions["2026-10-08"].submitted && !state.submissions["2026-10-08"].changed && state.submissions["2026-10-08"].note === "preserve", "Resubmit did not commit authorised records and submission state");
+    const approvedState = JSON.parse(transactionState), committedState = JSON.stringify(state);
+    assert(recordsEqual(state.records["2026-10-22"], approvedState.records["2026-10-22"]) && recordsEqual(state.records["2026-11-05"], approvedState.records["2026-11-05"]) && recordsEqual(state.submissions["2026-10-22"], approvedState.submissions["2026-10-22"]) && recordsEqual(state.settings, approvedState.settings), "resubmission modified unrelated periods or settings");
+    assert(!commitRecordSubmission({date:activeDate,candidateRecord:{...exportRecord,finishTime:"19:00"},previous:clone(state.records[activeDate]),historicalAuthorization:oldPermission}) && JSON.stringify(state) === committedState, "stale permission allowed a post-resubmission write");
+    assert(el("status").textContent.includes("resubmitted successfully") && !el("status").textContent.includes("This fortnight has already been submitted."), "resubmission feedback is missing or removed warning returned");
+    authoriseHistoricalPeriod("2026-10-08"); input("finishTime", "1821"); el("saveDraft").click();
+    change("recordDate", "2026-10-22");
+    assert(!el("historicalDiscardModal").hidden && activeDate === "2026-10-08" && !historicalEditAllowed("2026-10-22"), "date switching transferred historical permission or silently discarded changes");
+    el("keepHistoricalChanges").click();
+    change("recordDate", "2026-10-22"); el("discardHistoricalChanges").click();
+    assert(activeDate === "2026-10-22" && !historicalSession && submittedPeriodLocked() && JSON.stringify(state) === committedState, "discard-and-navigate changed saved records or transferred permission");
+    authoriseHistoricalPeriod("2026-10-08"); el("cancelHistoricalSession").click();
+    assert(!historicalSession && el("historicalDiscardModal").hidden, "clean historical Cancel unnecessarily prompted or retained permission");
+    authoriseHistoricalPeriod("2026-10-08");
+    change("recordDate", "2026-10-10"); input("startTime", "0900"); input("lunchOut", "1200"); input("lunchIn", "1300"); input("finishTime", "1700");
+    el("resubmitHistoricalTimesheet").click();
+    assert(!el("workConfirmationModal").hidden && historicalSession && !state.records["2026-10-10"], "historical Resubmit bypassed existing weekend confirmation");
+    const pendingHistoricalConfirmation = pendingRecordSubmission;
+    el("resubmitHistoricalReminder").click(); el("resubmitHistoricalTimesheet").click();
+    assert(pendingRecordSubmission === pendingHistoricalConfirmation, "duplicate Resubmit clicks restarted an in-progress confirmation");
+    el("cancelSpecialWork").click();
+    assert(historicalSession && !state.records["2026-10-10"] && activeDate === "2026-10-10", "declining weekend confirmation lost historical session");
+    el("resubmitHistoricalTimesheet").click(); el("confirmSpecialWork").click();
+    assert(!historicalSession && state.records["2026-10-10"]?.finishTime === "17:00" && submittedPeriodLocked(), "confirmed weekend historical resubmission failed");
+    assertPeriodBadges("Submitted"); assertHistoricalReminder(false);
+    authoriseHistoricalPeriod("2026-10-08"); input("finishTime", "1821"); el("submitRecord").click();
+    assert(el("status").textContent === "Changes saved to the historical working draft. Resubmit to commit them.", "historical working-draft success notification changed");
+    let upperWrites = 0;
+    Storage.prototype.setItem = function(key,value) { if (key === STORAGE_KEY) { upperWrites++; el("resubmitHistoricalTimesheet").click(); } return setItem.call(this,key,value); };
+    try { el("resubmitHistoricalReminder").click(); el("resubmitHistoricalReminder").click(); el("resubmitHistoricalTimesheet").click(); } finally { Storage.prototype.setItem = setItem; }
+    assert(upperWrites === 1 && !historicalSession && state.records["2026-10-08"].finishTime === "18:21", "upper Resubmit failed to commit the same draft exactly once or permit re-entry");
+    assertPeriodBadges("Submitted"); assertHistoricalReminder(false);
+    for (const date of ["2026-10-07", todayISO(), C.addDays(periodFor(todayISO()).start, 14), "2026-10-08"]) {
+      loadRecord(date, true); assertPeriodBadges(fortnightStatusFor(periodFor(date).start));
+    }
+    const beforeFutureSession = clone(state), beforeFutureStorage = localStorage.getItem(STORAGE_KEY);
+    const futureSubmittedStart = C.addDays(periodFor(todayISO()).start, 14);
+    state.records[futureSubmittedStart] = clone(exportRecord); state.submissions[futureSubmittedStart] = {submitted:true,changed:false};
+    save(); loadRecord(futureSubmittedStart, true);
+    authoriseHistoricalPeriod(futureSubmittedStart);
+    assertPeriodBadges("To be submitted"); assertHistoricalReminder(true);
+    el("cancelHistoricalSession").click();
+    assertPeriodBadges("Submitted"); assertHistoricalReminder(false);
+    state = beforeFutureSession; localStorage.setItem(STORAGE_KEY, beforeFutureStorage); renderSettings(); loadRecord("2026-10-08", true);
+    loadRecord("2026-11-05", true); clearRecordForm(); input("startTime", "0900"); el("saveDraft").click();
+    assert(el("status").textContent === "Draft saved" && state.drafts["2026-11-05"].record.startTime === "09:00", "ordinary unsubmitted draft Save or success notification regressed");
+    loadRecord("2026-10-08", true);
+    assert(el("recordsBody").querySelectorAll("[data-edit],[data-delete]").length === 0 && !el("status").textContent.includes("This fortnight has already been submitted."), "relocked records exposed actions or removed inline warning");
+    const afterTransactionStorage = localStorage.getItem(STORAGE_KEY);
+    deleteRecord("2026-10-08");
+    assert(localStorage.getItem(STORAGE_KEY) === afterTransactionStorage && !requestRecordOpen("2026-10-08", "edit"), "direct row mutation handlers bypassed submitted protection");
+    authoriseHistoricalPeriod("2026-10-08"); input("finishTime", "1821"); el("saveDraft").click();
+    change("viewFortnight", "2026-10-22");
+    assert(!el("historicalDiscardModal").hidden && historicalSession.start === "2026-10-08" && !historicalEditAllowed("2026-10-22"), "historical selectors transferred permission or dropped staged changes");
+    el("keepHistoricalChanges").click();
+    assert(historicalStart === "2026-10-08" && el("viewFortnight").value === "2026-10-08", "Keep Editing did not restore the selected historical fortnight");
+    el("cancelHistoricalSession").click(); el("discardHistoricalChanges").click();
+    loadRecord("2026-11-06", true); input("startTime", "0915");
+    authoriseHistoricalPeriod("2026-10-08");
+    assert(state.drafts["2026-11-06"].record.startTime === "09:15" && historicalSession, "historical entry discarded unsaved ordinary Daily Entry work");
+    el("cancelHistoricalSession").click();
+    authoriseHistoricalPeriod("2026-11-05");
+    assert(!historicalSession && historicalEditAllowed("2026-11-05") && el("resubmitHistoricalTimesheet").hidden && el("cancelHistoricalSession").hidden, "ordinary unsubmitted historical workflow incorrectly acquired submitted-session controls");
+    revokeHistoricalEdit(); loadRecord("2026-10-08", true);
+    change("viewFortnight", "2026-11-19");
+    const emptyPeriodState = JSON.stringify(state);
+    el("editHistoricalTimesheet").click(); el("confirmHistoricalEdit").click();
+    assert(!historicalSession && !historicalEditAuthorization && el("historicalEditStatus").textContent.includes("No saved records") && JSON.stringify(state) === emptyPeriodState, "empty historical period created records or granted permission");
+    // Footer copy is local-storage verified, pure white and high contrast over the existing background.
+    const privacy = document.querySelector(".privacy-disclaimer"), privacyBody = privacy.querySelector("p");
+    assert(privacy.nextElementSibling.classList.contains("feedback-entry") && privacy.parentElement.tagName === "FOOTER" && privacy.querySelector("h2").textContent === "Privacy & Data Storage", "Feedback is not directly below the privacy disclaimer");
+    const feedbackRect = el("openFeedback").getBoundingClientRect(), footerRect = privacy.parentElement.getBoundingClientRect();
+    assert(Math.abs((feedbackRect.left + feedbackRect.right) / 2 - (footerRect.left + footerRect.right) / 2) < .02 && feedbackRect.width < footerRect.width / 2 && feedbackRect.top > privacy.getBoundingClientRect().bottom, "Feedback is not compact, centred beneath the disclaimer");
+    assert(privacyBody.textContent === "Your timesheet data is stored locally in your browser and is not uploaded to the cloud. Records do not sync across devices, so please use the same device and browser. Avoid entering sensitive personal information and export your records regularly for backup.", "privacy wording changed");
+    const bodyStyle = getComputedStyle(privacyBody), headingStyle = getComputedStyle(privacy.querySelector("h2"));
+    assert(bodyStyle.color === "rgb(255, 255, 255)" && headingStyle.color === "rgb(255, 255, 255)" && bodyStyle.opacity === "1" && headingStyle.opacity === "1", "privacy text must be opaque pure white");
+    const background = getComputedStyle(document.body).backgroundColor.match(/\d+/g).slice(0, 3).map(Number);
+    const linear = background.map(value => { const s = value / 255; return s <= .04045 ? s / 12.92 : ((s + .055) / 1.055) ** 2.4; });
+    const contrast = 1.05 / (.2126 * linear[0] + .7152 * linear[1] + .0722 * linear[2] + .05);
+    assert(contrast >= 4.5 && parseFloat(bodyStyle.fontSize) >= 13 && parseFloat(bodyStyle.fontSize) <= 14 && parseInt(headingStyle.fontWeight) > parseInt(bodyStyle.fontWeight), "privacy contrast or typography is insufficient");
+    assert(getComputedStyle(privacy).backgroundColor === "rgba(0, 0, 0, 0)" && privacy.scrollWidth <= privacy.clientWidth, "privacy disclaimer introduced a box or overflow");
     window.scrollTo(0, 0);
     result.textContent = "PASS: Copy Previous record date summary colours attendance settings Leave TOIL welcome Feedback shared durations email CSV validation synchronized calculations responsive workflow";
   } catch (error) {

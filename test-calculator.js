@@ -129,4 +129,49 @@ assert.equal(exportRows[0][0], "2026-08-20");
 assert.equal(exportRows[13][0], "2026-09-02");
 assert.deepEqual(exportRows[2], ["2026-08-22", ...Array(14).fill("")]);
 assert.deepEqual(C.fortnightsOverlappingMonth(2026, 8, "2026-08-20"), ["2026-07-23", "2026-08-06", "2026-08-20"]);
-console.log("All calculation tests passed.");
+// Reporting periods are calendar dates, not elapsed 24-hour intervals.
+// Run these cases in explicit zones so a UTC developer machine catches DST regressions.
+const originalTimezone = process.env.TZ;
+const calendarDate = (start, offset) => {
+  const date = new Date(`${start}T00:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + offset);
+  return date.toISOString().slice(0, 10);
+};
+try {
+  for (const timezone of ["Australia/Sydney", "Australia/Lord_Howe", "America/New_York", "Australia/Brisbane", "UTC"]) {
+    process.env.TZ = timezone;
+    const periods = [
+      ["2026-09-24", "2026-09-24"], ["2026-09-24", "2026-10-08"], ["2026-09-24", "2026-10-22"],
+      ["2026-10-22", "2026-09-24"], // Historical period before a daylight-saving anchor.
+      ["2026-03-26", "2026-03-26"], ["2026-03-26", "2026-04-09"], // Sydney clocks go back.
+      ["2026-02-26", "2026-03-12"], ["2026-10-22", "2026-11-05"], // New York transitions.
+      ["2024-02-15", "2024-02-29"], ["2026-12-24", "2026-12-24"] // Leap day and year boundary.
+    ];
+    for (const [anchor, start] of periods) {
+      const expectedDates = Array.from({length:14}, (_, offset) => calendarDate(start, offset));
+      const end = expectedDates.at(-1), label = `${timezone}: ${start}`;
+      expectedDates.forEach(date => assert.deepEqual(C.fortnightFor(date, anchor), {start, end}, `${label}: ${date} belongs to the wrong period`));
+      assert.equal(C.fortnightFor(calendarDate(start, -1), anchor).end, calendarDate(start, -1), `${label}: previous boundary`);
+      assert.equal(C.fortnightFor(calendarDate(start, 14), anchor).start, calendarDate(start, 14), `${label}: next boundary`);
+      assert.equal(C.addDays(start, 13), end, `${label}: calendar addition`);
+      const boundaryRecords = {
+        [calendarDate(start, -1)]: {...base, leaveHours:"9:00"},
+        [start]: {...base, leaveHours:"0:01"},
+        [end]: {...base, leaveHours:"0:02"},
+        [calendarDate(start, 14)]: {...base, leaveHours:"8:00"}
+      };
+      const rows = C.buildFortnightExportRows(boundaryRecords, {...settings, fortnightStart:anchor}, start);
+      assert.deepEqual(rows.map(row => row[0]), expectedDates, `${label}: export must contain exactly the 14 selected dates`);
+      assert(rows.every(row => row.length === 15), `${label}: CSV column count changed`);
+      assert.equal(rows[0][10], "0:01", `${label}: first-day record missing`);
+      assert.equal(rows[13][10], "0:02", `${label}: last-day record missing`);
+      assert(rows.slice(1, 13).every(row => row.slice(1).every(value => value === "")), `${label}: empty days picked up unrelated records`);
+      assert.deepEqual(C.buildFortnightExportRows(boundaryRecords, {...settings, fortnightStart:anchor}, expectedDates[7]), rows, `${label}: selecting a date within the period changed its rows`);
+    }
+    assert.deepEqual(C.fortnightsOverlappingMonth(2026, 10, "2026-09-24"), ["2026-09-24", "2026-10-08", "2026-10-22"], `${timezone}: October selector`);
+    assert.deepEqual(C.fortnightsOverlappingMonth(2026, 11, "2026-09-24"), ["2026-10-22", "2026-11-05", "2026-11-19"], `${timezone}: November selector`);
+  }
+} finally {
+  if (originalTimezone === undefined) delete process.env.TZ; else process.env.TZ = originalTimezone;
+}
+console.log("All calculation tests passed, including reporting-period boundaries in five time zones.");

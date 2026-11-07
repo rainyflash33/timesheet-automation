@@ -11,7 +11,7 @@
   <link rel="manifest" href="manifest.webmanifest?v=clocky-icon-v2">
   <link rel="icon" type="image/png" sizes="192x192" href="assets/icons/clocky-icon-192.png?v=clocky-icon-v2">
   <link rel="apple-touch-icon" sizes="180x180" href="assets/icons/clocky-apple-touch-icon-180.png?v=clocky-icon-v2">
-  <link rel="stylesheet" href="styles.css?v=settings-helper-layout-v1">
+  <link rel="stylesheet" href="styles.css?v=clocky-release-v21">
 </head>
 <body>
   <main class="layout-unified">
@@ -30,11 +30,12 @@
 
     <section id="submissionReminder" class="submission-reminder" hidden>
       <div><strong id="submissionMessage"></strong><p id="submissionPeriod"></p></div>
-      <button id="markSubmitted">Mark fortnight as submitted</button>
+      <button id="markSubmitted">Submit Timesheet</button>
+      <button id="resubmitHistoricalReminder" type="button" hidden>Resubmit</button>
     </section>
 
     <section id="dailyEntryCard" class="card" aria-label="Work times">
-      <h2>Daily Entry</h2>
+      <div class="summary-title-row daily-entry-heading"><h2>Daily Entry</h2><span id="dailyEntryStatus" class="period-status"></span></div>
       <div id="basicFields" class="basic-time-fields"></div>
       <button id="toggleInterruptions" class="secondary interruption-toggle">+ Add Additional Time Entry</button>
       <div id="interruptionEditors" class="interruption-editors"></div>
@@ -59,7 +60,7 @@
     </div>
 
     <section class="card">
-      <h2>Calculated for this date</h2>
+      <div class="summary-title-row calculated-heading"><h2>Calculated for this date</h2><span id="calculatedDateStatus" class="period-status"></span></div>
       <div id="dailyResults" class="metrics"></div>
     </section>
 
@@ -70,7 +71,7 @@
 
     <section class="card history-card">
       <div class="section-heading history-heading"><h2>Timesheet History</h2><button id="exportCsv" class="secondary"><span class="desktop-action-label">Export Fortnight CSV</span><span class="mobile-action-label">Export CSV</span></button><button id="emailCsv" class="secondary"><span class="desktop-action-label">Send CSV by Email</span><span class="mobile-action-label">Send by Email</span></button></div>
-      <div class="table-wrap"><table><thead><tr><th>Date</th><th>Daily hours</th><th id="dailyBalanceHeading">Daily Flex</th><th id="progressiveBalanceHeading">Progressive Flex</th><th>TOIL balance</th><th></th></tr></thead><tbody id="recordsBody"></tbody></table></div>
+      <div class="table-wrap"><table><thead><tr><th>Date</th><th>Daily hours</th><th id="dailyBalanceHeading">Daily Flex</th><th id="progressiveBalanceHeading">Progressive Flex</th><th>TOIL balance</th><th id="recordActionsHeading"></th></tr></thead><tbody id="recordsBody"></tbody></table></div>
     </section>
 
     <section class="card settings">
@@ -112,8 +113,14 @@
           <label>Year <select id="filterYear"></select></label>
           <label>Month <select id="filterMonth"></select></label>
           <label>Fortnight <select id="viewFortnight"></select></label>
-          <button id="exportSelectedFortnight" class="secondary" type="button">Export</button>
         </div>
+        <div class="historical-actions">
+          <button id="editHistoricalTimesheet" type="button">Edit Timesheet</button>
+          <button id="resubmitHistoricalTimesheet" type="button" hidden>Resubmit</button>
+          <button id="exportSelectedFortnight" class="secondary" type="button">Export</button>
+          <button id="cancelHistoricalSession" class="secondary" type="button" hidden>Cancel</button>
+        </div>
+        <p id="historicalEditStatus" class="inline-status" role="status" aria-live="polite"></p>
         <div class="multi-period-export">
           <h3>Export Multiple Periods</h3>
           <div class="multi-period-fields">
@@ -152,8 +159,21 @@
       </div>
     </section>
 
+    <footer class="clocky-footer">
+    <section class="privacy-disclaimer" aria-labelledby="privacyTitle">
+      <h2 id="privacyTitle">Privacy &amp; Data Storage</h2>
+      <p>Your timesheet data is stored locally in your browser and is not uploaded to the cloud. Records do not sync across devices, so please use the same device and browser. Avoid entering sensitive personal information and export your records regularly for backup.</p>
+    </section>
     <div class="feedback-entry"><button id="openFeedback" class="secondary" type="button">Feedback</button></div>
+    </footer>
   </main>
+  <div id="submittedWarningModal" class="modal-backdrop" hidden>
+    <section class="dialog-card welcome-modal" role="dialog" aria-modal="true" aria-labelledby="submittedWarningTitle" aria-describedby="submittedWarningMessage">
+      <h2 id="submittedWarningTitle">You CANNOT edit a submitted timesheet</h2>
+      <div id="submittedWarningMessage"><p>This fortnight has already been submitted. You cannot make changes to a submitted timesheet.</p><p>To make changes, go to Historical Timesheets, select the relevant fortnight, and click Edit Timesheet.</p></div>
+      <div class="modal-actions"><button id="dismissSubmittedWarning" type="button">OK, Got It</button></div>
+    </section>
+  </div>
   <div id="emailModal" class="modal-backdrop" hidden>
     <section class="email-modal" role="dialog" aria-modal="true" aria-labelledby="emailModalTitle">
       <div class="section-heading"><h2 id="emailModalTitle">Send Timesheet by Email</h2><button id="closeEmailModal" class="secondary modal-close" type="button" aria-label="Close">×</button></div>
@@ -187,6 +207,24 @@
       <div class="modal-actions"><button id="confirmSpecialWork" type="button">Confirm</button><button id="cancelSpecialWork" class="secondary" type="button">Go Back</button></div>
     </section>
   </div>
+  <div id="historicalDiscardModal" class="modal-backdrop" hidden>
+    <section class="dialog-card welcome-modal" role="dialog" aria-modal="true" aria-labelledby="historicalDiscardTitle" aria-describedby="historicalDiscardMessage">
+      <h2 id="historicalDiscardTitle">Discard historical changes?</h2>
+      <p id="historicalDiscardMessage">Any changes made during this editing session will be discarded. The timesheet will remain submitted and locked.</p>
+      <div class="modal-actions"><button id="keepHistoricalChanges" class="secondary" type="button">Keep Editing</button><button id="discardHistoricalChanges" type="button">Discard Changes</button></div>
+    </section>
+  </div>
+  <div id="historicalEditModal" class="modal-backdrop" hidden>
+    <section class="dialog-card welcome-modal" role="dialog" aria-modal="true" aria-labelledby="historicalEditTitle" aria-describedby="historicalEditMessage">
+      <h2 id="historicalEditTitle">Edit Historical Timesheet?</h2>
+      <p id="historicalEditMessage">Are you sure you want to edit this historical timesheet? You will be able to review and modify the entries for the selected fortnight.</p>
+      <p id="historicalSubmittedNotice" hidden>This fortnight has already been submitted. Continue Editing authorises changes to this fortnight only. Saved changes will require resubmission.</p>
+      <p id="historicalDraftNotice" hidden>Your Daily Entry has unsaved changes. Continue Editing will save them as a draft before opening this timesheet.</p>
+      <p id="historicalEditError" class="field-error" role="alert" hidden></p>
+      <div class="modal-actions"><button id="cancelHistoricalEdit" class="secondary" type="button">Cancel</button><button id="confirmHistoricalEdit" type="button">Continue Editing</button></div>
+    </section>
+  </div>
+
   <div id="copyPreviousModal" class="modal-backdrop" hidden>
     <section class="dialog-card welcome-modal" role="dialog" aria-modal="true" aria-labelledby="copyPreviousTitle">
       <h2 id="copyPreviousTitle">Replace current entry?</h2>
@@ -247,8 +285,8 @@
       <div class="modal-actions"><button id="cancelResetHistory" class="secondary" type="button">Cancel</button><button id="confirmResetHistory" class="danger-button" type="button" disabled>Reset History</button></div>
     </section>
   </div>
-  <script src="calculator.js"></script>
-  <script src="app.js?v=hero-status-layout-v1"></script>
-  <script src="pwa-register.js?v=install-clocky-v1"></script>
+  <script src="calculator.js?v=clocky-release-v21"></script>
+  <script src="app.js?v=clocky-release-v21"></script>
+  <script src="pwa-register.js?v=clocky-release-v21"></script>
 </body>
 </html>

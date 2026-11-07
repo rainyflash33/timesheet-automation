@@ -10,8 +10,19 @@ const DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Frid
 const todayISO = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`; };
 const defaults = { records: {}, submissions: {}, drafts: {}, activeDraftDate:"", settings: { attendanceType: "Flextime", fortnightStart: "", openingFlex: "0:00", openingToil: "0:00", standardByDay: ["0:00", "7:21", "7:21", "7:21", "7:21", "7:21", "0:00"] } };
 let state = load();
-let activeDate = state.activeDraftDate && state.drafts[state.activeDraftDate] ? state.activeDraftDate : todayISO();
+let activeDate = initialRecordDate();
 let viewStart = "";
+let historicalStart = "";
+let historicalMode = false;
+let historicalEditStart = "";
+let historicalEditAuthorization = null;
+let historicalEditSequence = 0;
+let historicalSession = null;
+let historicalResubmitting = false;
+let pendingHistoricalExit = null;
+let historicalDiscardFocus = null;
+let historicalDiscardMainInert = false;
+let pendingHistoricalEdit = "";
 let draft = emptyRecord(state.settings.attendanceType);
 let originalDraft = emptyRecord(state.settings.attendanceType);
 let originalSettings = "";
@@ -24,6 +35,8 @@ let editMode = false;
 let pendingRecordSubmission = null;
 let pendingWeekendRecordOpen = null;
 let pendingPreviousRecord = null;
+let submittedWarningFocus = null;
+let submittedWarningMainInert = false;
 
 function clone(value) { return JSON.parse(JSON.stringify(value)); }
 function el(id) { return document.getElementById(id); }
@@ -96,7 +109,7 @@ function recordsEqual(a, b) { return JSON.stringify(a) === JSON.stringify(b); }
 function interruptionEditorIsDirty() {
   return [...document.querySelectorAll(".interruption-editor")].some(editor => editor.querySelector("[data-interruption-out]").value !== editor.dataset.originalOut || editor.querySelector("[data-interruption-in]").value !== editor.dataset.originalIn);
 }
-function draftIsDirty() { return !recordsEqual(draft, originalDraft) || interruptionEditorIsDirty(); }
+function draftIsDirty() { return submittedPeriodLocked() ? meaningfulDailyChanges() : !recordsEqual(draft, originalDraft) || interruptionEditorIsDirty(); }
 function settingsAreDirty() { return settingsSnapshot() !== originalSettings; }
 
 function buildUI() {
@@ -128,7 +141,24 @@ function buildUI() {
   el("viewFortnight").addEventListener("change", () => changeFortnight(el("viewFortnight").value));
   el("filterYear").addEventListener("change", () => changePeriodFilter(Number(el("filterYear").value), filterMonth));
   el("filterMonth").addEventListener("change", () => changePeriodFilter(filterYear, Number(el("filterMonth").value)));
-  el("exportSelectedFortnight").addEventListener("click", () => exportCsv(viewStart));
+  el("exportSelectedFortnight").addEventListener("click", () => exportCsv(historicalStart));
+  el("editHistoricalTimesheet").addEventListener("click", openHistoricalEdit);
+  el("resubmitHistoricalTimesheet").addEventListener("click", resubmitHistoricalEdit);
+  el("resubmitHistoricalReminder").addEventListener("click", resubmitHistoricalEdit);
+  el("cancelHistoricalSession").addEventListener("click", () => requestHistoricalExit());
+  el("keepHistoricalChanges").addEventListener("click", () => closeHistoricalDiscard());
+  el("discardHistoricalChanges").addEventListener("click", discardHistoricalChanges);
+  el("historicalDiscardModal").addEventListener("keydown", event => {
+    if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); closeHistoricalDiscard(); }
+    if (event.key === "Tab") {
+      event.preventDefault();
+      (document.activeElement === el("keepHistoricalChanges") ? el("discardHistoricalChanges") : el("keepHistoricalChanges")).focus();
+    }
+  });
+  el("cancelHistoricalEdit").addEventListener("click", closeHistoricalEdit);
+  el("confirmHistoricalEdit").addEventListener("click", confirmHistoricalEdit);
+  el("historicalEditModal").addEventListener("click", event => { if (event.target === el("historicalEditModal")) closeHistoricalEdit(); });
+  document.addEventListener("keydown", event => { if (event.key === "Escape" && !el("historicalEditModal").hidden) closeHistoricalEdit(); });
   ["exportPeriodFrom", "exportPeriodTo"].forEach(id => {
     el(id).addEventListener("input", () => clearExportDateError(id));
     el(id).addEventListener("change", () => normalizeExportDateField(id));
@@ -136,8 +166,13 @@ function buildUI() {
   });
   el("exportMultiplePeriods").addEventListener("click", () => exportMultiplePeriodsCsv());
   el("toggleInterruptions").addEventListener("click", () => openInterruptionEditor());
-  el("submitRecord").addEventListener("click", submitRecord);
-  el("saveDraft").addEventListener("click", saveDraft);
+  el("submitRecord").addEventListener("click", () => submitRecord({showSubmittedWarning:true}));
+  el("saveDraft").addEventListener("click", () => saveDraft({showSubmittedWarning:true}));
+  el("dismissSubmittedWarning").addEventListener("click", closeSubmittedWarning);
+  el("submittedWarningModal").addEventListener("keydown", event => {
+    if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); closeSubmittedWarning(); }
+    if (event.key === "Tab") { event.preventDefault(); el("dismissSubmittedWarning").focus(); }
+  });
   el("copyPrevious").addEventListener("click", copyPrevious);
   el("clearRecord").addEventListener("click", clearRecordForm);
   el("cancelCopyPrevious").addEventListener("click", closeCopyPreviousModal);
@@ -185,7 +220,7 @@ function buildUI() {
   el("feedbackImprove").addEventListener("input", () => { el("feedbackImproveError").hidden = true; el("feedbackImprove").removeAttribute("aria-invalid"); });
   document.querySelectorAll('[name="feedbackRating"]').forEach(input => input.addEventListener("change", () => { el("feedbackRatingError").hidden = true; }));
   el("markSubmitted").addEventListener("click", markFortnightSubmitted);
-  window.addEventListener("beforeunload", event => { if (draftIsDirty() || settingsAreDirty()) { event.preventDefault(); event.returnValue = ""; } });
+  window.addEventListener("beforeunload", event => { if (draftIsDirty() || settingsAreDirty() || historicalSessionHasChanges()) { event.preventDefault(); event.returnValue = ""; } });
 }
 
 function normalizeClockTime(value) {
@@ -259,15 +294,16 @@ function fillForm(value) {
 function updateDraft() { draft = readForm(); renderCurrentPreview(); updateActionState(); }
 
 function clearRecordForm() {
+  const locked = submittedPeriodLocked();
   const current = readForm();
   const editorHasData = [...document.querySelectorAll("[data-interruption-time]")].some(input => input.value);
   const savedDraft = state.drafts[activeDate] ? clone(state.drafts[activeDate]) : null;
   const previousActiveDraftDate = state.activeDraftDate;
-  const hadSavedDraft = removeSavedDraft(activeDate);
+  const hadSavedDraft = locked || historicalSession ? false : removeSavedDraft(activeDate);
   if (hadSavedDraft && !save()) { state.drafts[activeDate] = savedDraft; state.activeDraftDate = previousActiveDraftDate; return; }
   if (recordsEqual(current, emptyRecord(state.settings.attendanceType)) && !editorHasData) { setLeaveToilExpanded(false); if (hadSavedDraft) showStatus("Draft cleared"); return; }
   draft = emptyRecord(state.settings.attendanceType);
-  if (!editMode) originalDraft = clone(draft);
+  if (!editMode && !locked) originalDraft = clone(draft);
   fillForm(draft);
   closeInterruptionEditor();
   renderInterruptionList();
@@ -318,13 +354,16 @@ function confirmCopyPrevious() {
 }
 
 function removeSavedDraft(date) {
+  if (sessionContains(date)) { const existed = Boolean(historicalSession.drafts[date]); delete historicalSession.drafts[date]; return existed; }
+  if (!ensureRecordWritable(date)) return false;
   if (!state.drafts[date]) return false;
   delete state.drafts[date];
   if (state.activeDraftDate === date) state.activeDraftDate = Object.keys(state.drafts).slice(-1)[0] || "";
   return true;
 }
 
-function saveDraft() {
+function saveDraft({showSubmittedWarning = false} = {}) {
+  if (!guardDailySaveAttempt(showSubmittedWarning)) return false;
   if (!validateClockInputs("[data-record-time]")) return;
   if (!validateDurationInputs("[data-record-duration]")) return;
   draft = readForm();
@@ -332,6 +371,13 @@ function saveDraft() {
   const candidateDraft = readForm();
   if (C.isSeniorOfficer(candidateDraft.attendanceType) && candidateDraft.leaveType === "Flex") { alert("Flex Leave is not available for Senior Officer A/B attendance records."); el("leaveType").focus(); return; }
   if (!validateLeaveToil(candidateDraft)) return;
+  if (historicalSession && sessionContains(activeDate) && historicalEditAllowed(activeDate)) {
+    historicalSession.records[activeDate] = clone(candidateDraft);
+    historicalSession.drafts[activeDate] = {record:clone(candidateDraft), editMode:true, leaveToilExpanded:!el("leaveToilPanel").hidden};
+    editMode = true;
+    historicalSession.touched.add(activeDate);
+    draft = clone(candidateDraft); originalDraft = clone(draft); renderAll(); showStatus("Draft saved"); return true;
+  }
   const previousDraft = state.drafts[activeDate] ? clone(state.drafts[activeDate]) : null;
   const previousActiveDraftDate = state.activeDraftDate;
   state.drafts[activeDate] = { record:clone(candidateDraft), editMode:Boolean(editMode), leaveToilExpanded:!el("leaveToilPanel").hidden };
@@ -343,6 +389,7 @@ function saveDraft() {
   }
   draft = clone(candidateDraft); originalDraft = clone(draft);
   renderAll(); showStatus("Draft saved");
+  return true;
 }
 
 function openInterruptionEditor(slot = "") {
@@ -391,6 +438,7 @@ function classifyInterruption(out, incoming, record) {
   return "";
 }
 function stageInterruptionEditors() {
+  if (!ensureRecordWritable(activeDate)) return false;
   const editors = [...document.querySelectorAll(".interruption-editor")];
   if (!editors.length) return true;
   if (!validateClockInputs("[data-interruption-time]")) return false;
@@ -442,6 +490,179 @@ function cancelLeaveToil() {
 }
 
 function periodFor(date) { return C.fortnightFor(date, state.settings.fortnightStart); }
+function periodEntries(records, start) {
+  const end = C.addDays(start, 13);
+  return Object.fromEntries(Object.entries(records).filter(([date]) => date >= start && date <= end));
+}
+function sessionContains(date) {
+  return Boolean(historicalSession && date >= historicalSession.start && date <= C.addDays(historicalSession.start, 13));
+}
+function editableRecords() {
+  if (!historicalSession) return state.records;
+  const records = {...state.records};
+  Object.keys(periodEntries(records, historicalSession.start)).forEach(date => delete records[date]);
+  return {...records, ...historicalSession.records};
+}
+function historicalDraftFor(date) { return sessionContains(date) ? historicalSession.drafts[date] || (!historicalSession.touched.has(date) ? state.drafts[date] : null) : state.drafts[date]; }
+function historicalSessionHasChanges() {
+  return Boolean(historicalSession && (!recordsEqual(historicalSession.records, historicalSession.originalRecords) || Object.keys(historicalSession.drafts).length ||
+    (sessionContains(activeDate) && (draftIsDirty() || (editMode && !recordsEqual(readForm(), historicalSession.records[activeDate]))))));
+}
+function finishHistoricalCancel() {
+  revokeHistoricalEdit(); loadRecord(activeDate, true);
+  showStatus("Historical editing cancelled. No session changes were saved.");
+}
+function requestHistoricalExit(afterExit = null) {
+  if (!historicalSession) { if (afterExit) afterExit(); return true; }
+  if (!historicalSessionHasChanges()) { finishHistoricalCancel(); if (afterExit) afterExit(); return true; }
+  pendingHistoricalExit = typeof afterExit === "function" ? afterExit : null;
+  historicalDiscardFocus = document.activeElement;
+  historicalDiscardMainInert = document.querySelector("main").inert;
+  document.querySelector("main").inert = true;
+  el("historicalDiscardModal").hidden = false; el("keepHistoricalChanges").focus();
+  return false;
+}
+function closeHistoricalDiscard() {
+  el("historicalDiscardModal").hidden = true;
+  document.querySelector("main").inert = historicalDiscardMainInert;
+  pendingHistoricalExit = null;
+  if (historicalDiscardFocus?.isConnected && !historicalDiscardFocus.hidden) historicalDiscardFocus.focus();
+}
+function discardHistoricalChanges() {
+  const afterExit = pendingHistoricalExit;
+  closeHistoricalDiscard(); finishHistoricalCancel();
+  if (afterExit) afterExit(); else el("editHistoricalTimesheet").focus();
+}
+function historicalRecordError(record, date) {
+  if (C.TIME_KEYS.some(key => record[key] && !clockTimeIsValid(record[key]))) return "Enter valid 24-hour times.";
+  if ([record.leaveHours, record.toilHours].some(value => C.parseDuration(value) == null)) return "Enter valid leave and TOIL durations.";
+  if (Boolean(record.leaveType) !== Boolean(record.leaveHours)) return "Complete both Leave Type and Leave Hours.";
+  if (C.isSeniorOfficer(record.attendanceType) && record.leaveType === "Flex") return "Flex Leave is unavailable for Senior Officer attendance.";
+  for (const slot of ["morning", "afternoon"]) {
+    const out = record[`${slot}Out`], incoming = record[`${slot}In`];
+    if ((out || incoming) && (!out || !incoming || out >= incoming)) return "Complete valid Additional Time Out/In pairs.";
+  }
+  if (record.lunchOut && record.lunchIn && ((record.morningIn && record.morningIn > record.lunchOut) || (record.afternoonOut && record.afternoonOut < record.lunchIn))) return "Additional Time must not overlap lunch.";
+  return C.calculateDay(record, C.standardFor(date, state.settings)).incomplete ? "Complete both ends of each work segment." : "";
+}
+function resubmitHistoricalEdit(confirmation = null) {
+  const session = historicalSession;
+  if (!session || !historicalEditAllowed(session.start) || historicalResubmitting) return false;
+  if (pendingRecordSubmission?.historicalResubmission && confirmation?.id !== session.id) return false;
+  historicalResubmitting = true;
+  try {
+    return commitHistoricalResubmission(session, confirmation);
+  } finally { historicalResubmitting = false; }
+}
+function commitHistoricalResubmission(session, confirmation) {
+  if (sessionContains(activeDate) && (editMode || draftHasAttendanceData() || draftIsDirty() || interruptionEditorIsDirty())) {
+    if (!validateClockInputs("[data-record-time]") || !validateDurationInputs("[data-record-duration]")) { showStatus("Correct the highlighted fields before resubmitting.", true); return false; }
+    draft = readForm();
+    if (!stageInterruptionEditors()) return false;
+    session.drafts[activeDate] = {record:clone(readForm()), editMode, leaveToilExpanded:!el("leaveToilPanel").hidden};
+    session.touched.add(activeDate);
+  }
+  const records = clone(session.records);
+  Object.entries(session.drafts).forEach(([date, saved]) => { records[date] = clone(saved.record); });
+  for (const [date, record] of Object.entries(records)) {
+    const error = !sessionContains(date) ? "Record is outside the authorised fortnight." : historicalRecordError(record, date);
+    if (error) { showStatus(`Cannot resubmit ${date}: ${error}`, true); return false; }
+  }
+  const confirmedDates = confirmation?.id === session.id && recordsEqual(confirmation.records, records) ? confirmation.confirmedDates : [];
+  for (const [date, record] of Object.entries(records)) {
+    if (recordsEqual(record, session.originalRecords[date]) || confirmedDates.includes(date)) continue;
+    const submission = {historicalResubmission:{id:session.id, records:clone(records), confirmedDates:[...confirmedDates, date]}};
+    if (!guardWeekendSubmission(date, record, submission)) return false;
+    const details = workConfirmationFor(date, record);
+    if (details) { queueRecordConfirmation(submission, details); return false; }
+  }
+  try {
+    if (localStorage.getItem(STORAGE_KEY) !== session.storageBaseline || !recordsEqual(state.settings, session.settings) || !recordsEqual(periodEntries(state.records, session.start), session.originalRecords) || !recordsEqual(state.submissions[session.start], session.originalSubmission)) {
+      showStatus("Stored timesheet data changed after editing began. Keep a copy of your working changes, then cancel and reopen the timesheet before resubmitting.", true); return false;
+    }
+  } catch (error) { showStatus(`Stored timesheet data could not be checked: ${error.message}`, true); return false; }
+  const candidate = clone(state), previousState = state;
+  Object.keys(periodEntries(candidate.records, session.start)).forEach(date => delete candidate.records[date]);
+  Object.assign(candidate.records, records);
+  candidate.submissions[session.start] = {...session.originalSubmission, submitted:true, changed:false, submittedAt:new Date().toISOString()};
+  session.touched.forEach(date => delete candidate.drafts[date]);
+  if (session.touched.has(candidate.activeDraftDate)) candidate.activeDraftDate = Object.keys(candidate.drafts).slice(-1)[0] || "";
+  state = candidate;
+  if (!save()) { state = previousState; showStatus("Historical resubmission could not be saved. Your working draft and editing permission are preserved.", true); return false; }
+  revokeHistoricalEdit(); loadRecord(activeDate, true);
+  showStatus("Historical timesheet resubmitted successfully. Changes saved and the fortnight is locked.");
+  return true;
+}
+function submittedPeriodStart(date) {
+  return Object.keys(state.submissions).find(start => /^\d{4}-\d{2}-\d{2}$/.test(start) && state.submissions[start]?.submitted && date >= start && date <= C.addDays(start, 13)) || "";
+}
+function historicalEditAllowed(date) {
+  const permission = historicalEditAuthorization;
+  return Boolean(permission && historicalEditStart === permission.start && permission.anchor === state.settings.fortnightStart && validAnchor() && periodFor(date).start === permission.start && (!submittedPeriodStart(date) || (historicalSession && historicalSession.id === permission.id && historicalSession.start === permission.start)));
+}
+function submittedPeriodLocked(date = activeDate) {
+  const start = submittedPeriodStart(date);
+  return Boolean(start && !(historicalEditAllowed(date) && historicalEditStart === start));
+}
+function ensureRecordWritable(date) {
+  if (historicalSession && !sessionContains(date)) return false;
+  if (!submittedPeriodLocked(date)) return true;
+  return false;
+}
+function meaningfulDailyChanges() {
+  const current = readForm();
+  const normalise = (key, value) => {
+    const text = String(value || "").trim();
+    if (C.TIME_KEYS.includes(key)) return normalizeClockTime(text);
+    if (key === "leaveHours" || key === "toilHours") return normalizeDurationInput(text);
+    return text;
+  };
+  return RECORD_FIELDS.some(key => normalise(key, current[key]) !== normalise(key, originalDraft[key])) ||
+    [...document.querySelectorAll(".interruption-editor")].some(editor =>
+      normalise("morningOut", editor.querySelector("[data-interruption-out]").value) !== normalise("morningOut", editor.dataset.originalOut) ||
+      normalise("morningIn", editor.querySelector("[data-interruption-in]").value) !== normalise("morningIn", editor.dataset.originalIn));
+}
+function guardDailySaveAttempt(showWarning) {
+  if (submittedPeriodLocked()) {
+    if (showWarning) openSubmittedWarning();
+    return false;
+  }
+  if (historicalSession && !sessionContains(activeDate)) { showStatus("Resubmit or Cancel historical editing before changing another fortnight.", true); return false; }
+  return true;
+}
+function openSubmittedWarning() {
+  if (!el("submittedWarningModal").hidden) return;
+  submittedWarningFocus = document.activeElement;
+  const main = document.querySelector("main");
+  submittedWarningMainInert = main.inert;
+  main.inert = true;
+  el("submittedWarningModal").hidden = false;
+  el("dismissSubmittedWarning").focus();
+}
+function closeSubmittedWarning() {
+  el("submittedWarningModal").hidden = true;
+  document.querySelector("main").inert = submittedWarningMainInert;
+  if (submittedWarningFocus?.isConnected && !submittedWarningFocus.disabled) submittedWarningFocus.focus();
+  else el("saveDraft").focus();
+  submittedWarningFocus = null;
+}
+function revokeHistoricalEdit() {
+  historicalEditStart = ""; historicalEditAuthorization = null; historicalSession = null; historicalEditSequence++;
+  el("historicalEditStatus").textContent = "";
+  pendingRecordSubmission = null;
+  if (!pendingWeekendRecordOpen) el("workConfirmationModal").hidden = true;
+}
+function leaveHistoricalEditing() {
+  if (historicalSession) return requestHistoricalExit();
+  if (!historicalEditStart) return true;
+  if (draftIsDirty()) {
+    if (!confirm("Save your unsaved historical changes as a draft before leaving historical editing?")) return false;
+    if (!saveDraft()) return false;
+  }
+  revokeHistoricalEdit(); loadRecord(activeDate, true);
+  return true;
+}
+
 function formatPeriod(start) {
   const formatter = new Intl.DateTimeFormat("en-AU", { day:"numeric", month:"short", year:"numeric" });
   const localDate = iso => { const [y,m,d] = iso.split("-").map(Number); return new Date(y,m-1,d); };
@@ -454,68 +675,126 @@ function rebuildFortnightSelector() {
     yearSelect.disabled = monthSelect.disabled = selector.disabled = true; return;
   }
   yearSelect.disabled = monthSelect.disabled = selector.disabled = false;
-  const knownDates = [todayISO(), state.settings.fortnightStart, ...Object.keys(state.records), ...Object.keys(state.drafts), ...Object.keys(state.submissions)];
+  const knownDates = [todayISO(), activeDate, state.settings.fortnightStart, ...Object.keys(state.records), ...Object.keys(state.drafts), ...Object.keys(state.submissions)];
   const years = knownDates.map(date => Number(date.slice(0, 4)));
-  const minYear = Math.min(...years), maxYear = Math.max(...years);
+  const minYear = Math.min(filterYear, ...years), maxYear = Math.max(filterYear, ...years);
   yearSelect.innerHTML = Array.from({length:maxYear-minYear+1}, (_, i) => minYear+i).map(year => `<option value="${year}"${year === filterYear ? " selected" : ""}>${year}</option>`).join("");
   const monthNames = Array.from({length:12}, (_, i) => new Intl.DateTimeFormat("en-AU", {month:"long"}).format(new Date(2020, i, 1)));
   monthSelect.innerHTML = monthNames.map((name, i) => `<option value="${i+1}"${i+1 === filterMonth ? " selected" : ""}>${name}</option>`).join("");
   const starts = C.fortnightsOverlappingMonth(filterYear, filterMonth, state.settings.fortnightStart);
-  if (!starts.includes(viewStart)) {
+  if (!starts.includes(historicalStart)) {
     const currentStart = periodFor(todayISO()).start;
-    viewStart = starts.includes(currentStart) ? currentStart : starts[0];
+    historicalStart = starts.includes(currentStart) ? currentStart : starts[0];
   }
-  selector.innerHTML = starts.map(start => `<option value="${start}"${start === viewStart ? " selected" : ""}>${formatPeriod(start)}</option>`).join("");
+  selector.innerHTML = starts.map(start => `<option value="${start}"${start === historicalStart ? " selected" : ""}>${formatPeriod(start)}</option>`).join("");
 }
 function changePeriodFilter(year, month) {
-  if (draftIsDirty() && !confirm("Discard your unsaved changes and filter another month?")) { rebuildFortnightSelector(); return; }
-  filterYear = year; filterMonth = month; viewStart = "";
-  rebuildFortnightSelector();
-  const end = C.addDays(viewStart, 13), savedDates = Object.keys(state.records).filter(date => date >= viewStart && date <= end).sort();
-  const nextDate = todayISO() >= viewStart && todayISO() <= end ? todayISO() : (savedDates[0] || viewStart);
-  loadRecord(nextDate, true);
+  if (historicalSession) { requestHistoricalExit(() => changePeriodFilter(year, month)); if (historicalSession) rebuildFortnightSelector(); return; }
+  if (!leaveHistoricalEditing()) { rebuildFortnightSelector(); return; }
+  filterYear = year; filterMonth = month; historicalStart = ""; historicalMode = true;
+  el("historicalEditStatus").textContent = "";
+  renderAll();
 }
 function changeFortnight(start) {
-  if (draftIsDirty() && !confirm("Discard your unsaved changes and view another fortnight?")) { el("viewFortnight").value = viewStart; return; }
-  viewStart = start;
-  const end = C.addDays(start, 13), savedDates = Object.keys(state.records).filter(date => date >= start && date <= end).sort();
-  const nextDate = todayISO() >= start && todayISO() <= end ? todayISO() : (savedDates[0] || start);
-  loadRecord(nextDate, true);
+  if (historicalSession) { requestHistoricalExit(() => changeFortnight(start)); if (historicalSession) rebuildFortnightSelector(); return; }
+  if (!leaveHistoricalEditing()) { rebuildFortnightSelector(); return; }
+  historicalStart = start; historicalMode = true;
+  el("historicalEditStatus").textContent = "";
+  renderAll();
+}
+
+function openHistoricalEdit() {
+  if (historicalSession) {
+    if (historicalStart === historicalSession.start) { showStatus("Historical Edit Mode is already active. Use Resubmit or Cancel when finished."); return; }
+    requestHistoricalExit(() => openHistoricalEdit()); return;
+  }
+  if (!ensureValidAnchor()) return;
+  pendingHistoricalEdit = historicalStart;
+  el("historicalSubmittedNotice").hidden = !state.submissions[historicalStart]?.submitted;
+  el("historicalDraftNotice").hidden = !draftIsDirty();
+  el("historicalDraftNotice").textContent = submittedPeriodLocked() ? "Your temporary Daily Entry changes will remain in the form. They will not be saved until you explicitly save them in authorised historical editing." : "Your Daily Entry has unsaved changes. Continue Editing will save them as a draft before opening this timesheet.";
+  el("historicalEditError").hidden = true;
+  el("historicalEditModal").hidden = false;
+  el("cancelHistoricalEdit").focus();
+}
+function closeHistoricalEdit(cancelled = true) {
+  if (cancelled && !leaveHistoricalEditing()) return;
+  pendingHistoricalEdit = "";
+  el("historicalEditModal").hidden = true;
+  el("editHistoricalTimesheet").focus();
+}
+function confirmHistoricalEdit() {
+  const start = pendingHistoricalEdit;
+  if (!start) return;
+  const end = C.addDays(start, 13);
+  const dates = Object.keys(state.records).filter(date => date >= start && date <= end).sort();
+  if (!dates.length) {
+    closeHistoricalEdit(false);
+    el("historicalEditStatus").textContent = "No saved records for this fortnight. Select another fortnight to edit.";
+    return;
+  }
+  const continuingSubmittedChanges = submittedPeriodLocked() && meaningfulDailyChanges();
+  if (continuingSubmittedChanges && periodFor(activeDate).start !== start) {
+    el("historicalEditError").textContent = "Your temporary changes belong to another submitted fortnight. Authorise that fortnight first, or return to its saved values before opening a different timesheet.";
+    el("historicalEditError").hidden = false;
+    return;
+  }
+  if (!continuingSubmittedChanges && draftIsDirty() && !saveDraft()) {
+    el("historicalEditError").textContent = "Your Daily Entry could not be saved as a draft. Correct its highlighted fields before continuing. Your entry has not been discarded.";
+    el("historicalEditError").hidden = false;
+    return;
+  }
+  let storageBaseline = null;
+  if (state.submissions[start]?.submitted) {
+    try { storageBaseline = localStorage.getItem(STORAGE_KEY); }
+    catch (error) { el("historicalEditError").textContent = `Stored data could not be checked: ${error.message}`; el("historicalEditError").hidden = false; return; }
+  }
+  closeHistoricalEdit(false);
+  historicalEditStart = start;
+  historicalEditAuthorization = {start, anchor:state.settings.fortnightStart, id:++historicalEditSequence};
+  if (state.submissions[start]?.submitted) {
+    historicalSession = {start, id:historicalEditAuthorization.id, originalRecords:clone(periodEntries(state.records, start)), records:clone(periodEntries(state.records, start)), drafts:{}, touched:new Set(), originalSubmission:clone(state.submissions[start]), settings:clone(state.settings), storageBaseline};
+  }
+  // Opening an existing record does not change any stored record or submission status.
+  if (continuingSubmittedChanges) {
+    historicalMode = false; editMode = Boolean(state.records[activeDate]); renderAll();
+  } else loadRecord(dates[0], true, "edit");
+  showStatus("Editing historical timesheet. Select a date or use Edit beside an entry; save each change when ready.");
+  scrollTo({top:0, behavior:"smooth"});
 }
 
 function changeRecord(date) {
-  if (!date || (viewStart && (date < viewStart || date > C.addDays(viewStart, 13)))) { alert("Choose a Record date within the fortnight currently being viewed."); el("recordDate").value = activeDate; return; }
-  if (date === activeDate) return;
+  if (!date) { el("recordDate").value = activeDate; return; }
+  if (date === activeDate) { historicalMode = false; renderAll(); return; }
   if (!requestRecordOpen(date)) { el("recordDate").value = activeDate; renderRecordDate(); }
 }
 function requestRecordOpen(date, mode = "new") {
+  if (historicalSession && !sessionContains(date)) return requestHistoricalExit(() => requestRecordOpen(date, mode));
+  if (mode === "edit" && !ensureRecordWritable(date)) return false;
   if (draftIsDirty() && !confirm("Discard your unsaved changes and open another record?")) return false;
-  if (isWeekendISO(date)) {
-    pendingWeekendRecordOpen = { date, mode };
-    openWorkConfirmation({
-      title:"Please confirm this weekend entry",
-      message:"You have selected a Saturday or Sunday. Are you sure you want to enter a timesheet for this weekend day?"
-    });
-    return true;
-  }
   return loadRecord(date, true, mode);
 }
 function loadRecord(date, force = false, mode = "new") {
   if (!force && draftIsDirty() && !confirm("Discard your unsaved changes and open another record?")) return;
-  activeDate = date; el("recordDate").value = date; renderRecordDate();
-  const savedDraft = mode === "new" ? state.drafts[date] : null;
-  editMode = mode === "edit" || Boolean(savedDraft?.editMode && state.records[date]);
-  draft = savedDraft ? clone(savedDraft.record) : editMode ? clone(state.records[date]) : emptyRecord(state.settings.attendanceType); originalDraft = clone(draft);
-  fillForm(draft); closeInterruptionEditor(); renderInterruptionList(); setLeaveToilExpanded(savedDraft ? savedDraft.leaveToilExpanded : editMode && recordHasLeaveToil(draft)); renderAll();
+  if (historicalSession && !sessionContains(date)) { showStatus("Resubmit or Cancel the current historical session before opening another fortnight.", true); return false; }
+  if (historicalEditStart && !historicalEditAllowed(date)) revokeHistoricalEdit();
+  const historicalRecord = Boolean(historicalEditAllowed(date) && editableRecords()[date]);
+  const locked = submittedPeriodLocked(date);
+  activeDate = date; historicalMode = false; el("recordDate").value = date; renderRecordDate();
+  const savedDraft = !locked && (mode === "new" || historicalRecord) ? historicalDraftFor(date) : null;
+  editMode = !locked && (mode === "edit" || historicalRecord || Boolean(savedDraft?.editMode && editableRecords()[date]));
+  draft = locked ? clone(editableRecords()[date] || emptyRecord(state.settings.attendanceType)) : savedDraft ? clone(savedDraft.record) : editMode ? clone(editableRecords()[date]) : emptyRecord(state.settings.attendanceType); originalDraft = clone(draft);
+  fillForm(draft); closeInterruptionEditor(); renderInterruptionList(); setLeaveToilExpanded(savedDraft ? savedDraft.leaveToilExpanded : (editMode || locked) && recordHasLeaveToil(draft)); renderAll();
   return true;
 }
-function submitRecord() {
+function submitRecord({showSubmittedWarning = false} = {}) {
+  if (!guardDailySaveAttempt(showSubmittedWarning)) return false;
   if (!fortnightCalculationAllowed()) { setSettingsExpanded(true); alert("Please set the Fortnight Start Date to a Thursday before saving records."); el("fortnightStart").focus(); return; }
   if (!validateClockInputs("[data-record-time]")) return;
   if (!validateDurationInputs("[data-record-duration]")) return;
   draft = readForm();
   if (!stageInterruptionEditors()) return;
-  const existed = Object.prototype.hasOwnProperty.call(state.records, activeDate);
+  const existed = Object.prototype.hasOwnProperty.call(editableRecords(), activeDate);
   if (!editMode && existed) { alert("A record already exists for this date. Use Edit in Timesheet History to change it."); return; }
   if (editMode && !existed) { alert("This record no longer exists. Cancel the edit and submit it as a new record."); return; }
   const candidateRecord = readForm();
@@ -524,7 +803,7 @@ function submitRecord() {
   if (!validateLeaveToil(candidateRecord)) return;
   if (!validateInterruptions(candidateRecord)) return;
   if (!validateRecordCompleteness(candidateRecord)) return;
-  const submission = { date:activeDate, candidateRecord:clone(candidateRecord), previous:state.records[activeDate] ? clone(state.records[activeDate]) : null, existed, wasEditMode:editMode };
+  const submission = { date:activeDate, candidateRecord:clone(candidateRecord), previous:editableRecords()[activeDate] ? clone(editableRecords()[activeDate]) : null, existed, wasEditMode:editMode, historicalAuthorization:historicalEditAllowed(activeDate) ? historicalEditAuthorization.id : null };
   if (!guardWeekendSubmission(activeDate, candidateRecord, submission)) return;
   const publicHolidayConfirmation = workConfirmationFor(activeDate, candidateRecord);
   if (publicHolidayConfirmation) { queueRecordConfirmation(submission, publicHolidayConfirmation); return; }
@@ -532,18 +811,36 @@ function submitRecord() {
 }
 function nextAvailableRecordDate(date) {
   let nextDate = C.addDays(date, 1);
-  while (Object.prototype.hasOwnProperty.call(state.records, nextDate)) nextDate = C.addDays(nextDate, 1);
+  while (isWeekendISO(nextDate) || Object.prototype.hasOwnProperty.call(state.records, nextDate) || Object.prototype.hasOwnProperty.call(state.drafts, nextDate)) nextDate = C.addDays(nextDate, 1);
   return nextDate;
 }
-function advanceToNextAvailableRecordDate(date) {
-  const nextDate = nextAvailableRecordDate(date);
-  viewStart = periodFor(nextDate).start;
-  filterYear = Number(nextDate.slice(0, 4));
-  filterMonth = Number(nextDate.slice(5, 7));
-  loadRecord(nextDate, true);
+function defaultRecordDate() {
+  const dates = [...Object.keys(state.records), ...Object.keys(state.drafts)].filter(date => /^\d{4}-\d{2}-\d{2}$/.test(date)).sort();
+  if (dates.length) return nextAvailableRecordDate(dates.at(-1));
+  let date = todayISO();
+  while (isWeekendISO(date)) date = C.addDays(date, 1);
+  return date;
+}
+function initialRecordDate() {
+  return state.activeDraftDate && state.drafts[state.activeDraftDate] ? state.activeDraftDate : defaultRecordDate();
+}
+function advanceToNextAvailableRecordDate() {
+  loadRecord(defaultRecordDate(), true);
 }
 function commitRecordSubmission(submission) {
   const { date, candidateRecord, previous, existed, wasEditMode } = submission;
+  if (date !== activeDate || !ensureRecordWritable(date)) return false;
+  if (submittedPeriodStart(date) && submission.historicalAuthorization !== historicalEditAuthorization?.id) return false;
+  if (historicalSession && sessionContains(date) && historicalEditAllowed(date)) {
+    if (submission.historicalAuthorization !== historicalEditAuthorization.id || !recordsEqual(editableRecords()[date] || null, previous)) return false;
+    historicalSession.records[date] = clone(candidateRecord); delete historicalSession.drafts[date]; historicalSession.touched.add(date);
+    loadRecord(date, true, "edit"); showStatus("Changes saved to the historical working draft. Resubmit to commit them."); return true;
+  }
+  if (!recordsEqual(state.records[date] || null, previous)) { alert("This record has changed since editing began. Reopen it before saving."); return false; }
+  const periodSubmission = validAnchor() ? state.submissions[periodFor(date).start] : null;
+  if (historicalEditStart && periodFor(date).start === historicalEditStart && periodSubmission?.submitted && !periodSubmission.changed && !recordsEqual(previous, candidateRecord)) {
+    if (!confirm("This fortnight was previously submitted. Saving this change will mark it as needing resubmission. Save changes and update its status?")) return;
+  }
   const previousDraft = state.drafts[date] ? clone(state.drafts[date]) : null;
   const previousActiveDraftDate = state.activeDraftDate;
   const previousSubmissions = clone(state.submissions);
@@ -557,7 +854,7 @@ function commitRecordSubmission(submission) {
     state.submissions = previousSubmissions;
     return;
   }
-  if (!wasEditMode && !existed) advanceToNextAvailableRecordDate(date);
+  if (!wasEditMode && !existed) advanceToNextAvailableRecordDate();
   else {
     editMode = false; draft = emptyRecord(state.settings.attendanceType); originalDraft = clone(draft); fillForm(draft); closeInterruptionEditor(); renderInterruptionList(); setLeaveToilExpanded(false); renderAll();
   }
@@ -607,6 +904,7 @@ function confirmPendingRecordSubmission() {
   const submission = pendingRecordSubmission;
   if (!submission) return;
   closeWorkConfirmation();
+  if (submission.historicalResubmission) { resubmitHistoricalEdit(submission.historicalResubmission); return; }
   commitRecordSubmission(submission);
 }
 function openWorkConfirmation(details) {
@@ -627,10 +925,16 @@ function cancelPendingWorkConfirmation() {
   if (cancelledRecordOpen) { el("recordDate").value = activeDate; renderRecordDate(); }
 }
 function cancelEdit() {
-  if (!editMode) return;
+  if (historicalSession) { requestHistoricalExit(); return; }
+  if (!editMode && !historicalEditStart) return;
   if (draftIsDirty() && !confirm("Discard your unsaved changes and cancel editing?")) return;
-  editMode = false; draft = emptyRecord(state.settings.attendanceType); originalDraft = clone(draft);
-  fillForm(draft); closeInterruptionEditor(); renderInterruptionList(); setLeaveToilExpanded(false); renderAll(); showStatus("Edit cancelled.");
+  revokeHistoricalEdit();
+  if (submittedPeriodLocked()) loadRecord(activeDate, true);
+  else {
+    editMode = false; draft = emptyRecord(state.settings.attendanceType); originalDraft = clone(draft);
+    fillForm(draft); closeInterruptionEditor(); renderInterruptionList(); setLeaveToilExpanded(false); renderAll();
+  }
+  showStatus("Edit cancelled.");
 }
 function validateInterruptions(record) {
   const hasMorning = record.morningOut || record.morningIn;
@@ -659,9 +963,16 @@ function validateRecordCompleteness(record) {
   return false;
 }
 function deleteRecord(date) {
+  if (!ensureRecordWritable(date)) return false;
   const currentDirty = date === activeDate && draftIsDirty();
   const message = currentDirty ? `Delete ${date} and discard its unsaved changes? This cannot be undone.` : `Delete the record for ${date}? This cannot be undone.`;
   if (!confirm(message)) return;
+  if (historicalSession && sessionContains(date) && historicalEditAllowed(date)) {
+    delete historicalSession.records[date]; delete historicalSession.drafts[date]; historicalSession.touched.add(date);
+    if (date === activeDate) loadRecord(date, true);
+    else renderAll();
+    showStatus("Record removed from the historical working draft. Resubmit to commit the deletion."); return;
+  }
   const previousSubmissions = clone(state.submissions);
   const submittedChanged = flagSubmittedChange(date);
   const deleted = state.records[date]; delete state.records[date];
@@ -672,8 +983,10 @@ function deleteRecord(date) {
 }
 
 function flagSubmittedChange(date) {
+  if (sessionContains(date)) return false;
+  if (!ensureRecordWritable(date)) return false;
   if (!validAnchor()) return false;
-  const start = C.fortnightFor(date, state.settings.fortnightStart).start;
+  const start = submittedPeriodStart(date) || C.fortnightFor(date, state.settings.fortnightStart).start;
   const submission = state.submissions[start];
   if (!submission?.submitted || submission.changed) return false;
   submission.changed = true;
@@ -682,29 +995,31 @@ function flagSubmittedChange(date) {
 
 function renderAll() {
   updateConfigurationValidity();
-  const savedCalc = fortnightCalculationAllowed() ? C.recalculate(state.records, state.settings) : {};
+  const savedCalc = fortnightCalculationAllowed() ? C.recalculate(editableRecords(), state.settings) : {};
   const previewRecords = currentPreviewRecords();
   const previewCalc = fortnightCalculationAllowed() ? C.recalculate(previewRecords, state.settings) : {};
-  rebuildFortnightSelector(); updateRecordDateBounds();
-  renderCalculations(previewCalc); renderFortnight(previewCalc, previewRecords); renderRecords(savedCalc); renderSubmissionReminder(); renderFortnightStatus(); updateActionState();
+  rebuildFortnightSelector();
+  viewStart = validAnchor() ? (historicalMode ? historicalStart : periodFor(activeDate).start) : "";
+  updateRecordDateBounds();
+  renderCalculations(previewCalc); renderFortnight(historicalMode ? savedCalc : previewCalc, historicalMode ? editableRecords() : previewRecords); renderRecords(savedCalc); renderSubmissionReminder(); renderFortnightStatus(); updateActionState();
 }
 function updateRecordDateBounds() {
-  if (!viewStart) { el("recordDate").removeAttribute("min"); el("recordDate").removeAttribute("max"); return; }
-  el("recordDate").min = viewStart; el("recordDate").max = C.addDays(viewStart, 13);
+  el("recordDate").removeAttribute("min"); el("recordDate").removeAttribute("max");
 }
 function draftHasAttendanceData() {
   return C.TIME_KEYS.some(key => draft[key]) || Boolean(draft.leaveType || draft.leaveHours || draft.toilHours);
 }
 function currentPreviewRecords() {
-  const records = { ...state.records };
-  if (editMode || draftIsDirty() || draftHasAttendanceData()) records[activeDate] = clone(draft);
+  const records = { ...editableRecords() };
+  if (!submittedPeriodLocked() && (editMode || draftIsDirty() || draftHasAttendanceData())) records[activeDate] = clone(draft);
   return records;
 }
 function renderCurrentPreview() {
   if (!fortnightCalculationAllowed()) { renderCalculations({}); renderFortnight({}, {}); return; }
   const records = currentPreviewRecords();
   const calc = C.recalculate(records, state.settings);
-  renderCalculations(calc); renderFortnight(calc, records);
+  renderCalculations(calc);
+  renderFortnight(historicalMode ? C.recalculate(editableRecords(), state.settings) : calc, historicalMode ? editableRecords() : records);
 }
 function renderCalculations(calc) {
   const seniorOfficer = C.isSeniorOfficer(draft.attendanceType);
@@ -714,23 +1029,34 @@ function renderCalculations(calc) {
     showStatus("Invalid fortnight start date"); return;
   }
   let day = calc[activeDate];
-  if (!day) day = C.recalculate({ ...state.records, [activeDate]: draft }, state.settings)[activeDate];
+  if (!day) day = C.recalculate({ ...editableRecords(), [activeDate]: draft }, state.settings)[activeDate];
   metricList("dailyResults", [["Daily Hours", day.daily], [balanceLabels[0], seniorOfficer ? day.dailySog : day.dailyFlex], [balanceLabels[1], seniorOfficer ? day.progressiveSog : day.progressiveFlex], ["Progressive TOIL Balance", day.progressiveToil]]);
   if (draftIsDirty()) showStatus("Unsaved changes");
   else showStatus("");
 }
 function updateActionState() {
   el("submitRecord").textContent = editMode ? "Save Changes" : "Submit";
-  el("cancelEdit").hidden = !editMode;
+  const card = el("dailyEntryCard");
+  card.querySelectorAll("input").forEach(input => { input.readOnly = false; });
+  card.querySelectorAll("select").forEach(input => { input.disabled = false; });
+  card.querySelectorAll("button").forEach(button => { button.disabled = false; });
+  renderInterruptionEditorState();
+  el("submitRecord").disabled = !fortnightCalculationAllowed();
+  el("cancelEdit").hidden = !editMode && !historicalEditStart;
+  el("cancelEdit").disabled = false;
+  const sessionActive = Boolean(historicalSession && historicalEditAllowed(historicalSession.start));
+  el("resubmitHistoricalTimesheet").hidden = !sessionActive;
+  el("cancelHistoricalSession").hidden = !sessionActive;
+  if (sessionActive) el("historicalEditStatus").textContent = "Historical Edit Mode: changes are not committed until Resubmit.";
 }
 function metricList(id, entries) { el(id).innerHTML = entries.map(([label, value, helper]) => `<div><span>${label}</span>${helper ? `<small>${helper}</small>` : ""}<strong>${C.formatDuration(value) || "—"}</strong></div>`).join(""); }
 
-function renderFortnight(calc, records = state.records) {
-  const seniorOfficer = C.isSeniorOfficer(draft.attendanceType);
+function renderFortnight(calc, records = editableRecords()) {
+  const seniorOfficer = C.isSeniorOfficer(historicalMode ? state.settings.attendanceType : draft.attendanceType);
   if (!fortnightCalculationAllowed()) {
     el("periodDates").textContent = "Invalid fortnight start date";
     const label = seniorOfficer ? "SOG" : "Flex";
-    metricList("fortnightResults", [["Standard Hours", null], ["Hours Recorded This Period", null], ["TOIL Balance", null], [`Opening ${label} Balance`, null, "Carried over from previous fortnight"], [`Net ${label} for the Period`, null], [`Closing ${label} Balance`, null, "Carries forward to next fortnight"]]);
+    metricList("fortnightResults", [["Standard Hours", null], ["Hours Recorded This Period", null], [`Opening ${label} Balance`, null], [`Net ${label} for the Period`, null], [`Closing ${label} Balance`, null], ["TOIL Balance", null]]);
     return;
   }
   const period = { start: viewStart, end: C.addDays(viewStart, 13) };
@@ -748,46 +1074,73 @@ function renderFortnight(calc, records = state.records) {
   if (seniorOfficer) {
     const priorSogDates = Object.keys(calc).filter(d => d < period.start && calc[d].seniorOfficer).sort();
     const openingSog = priorSogDates.length ? calc[priorSogDates.at(-1)].progressiveSog : 0;
-    metricList("fortnightResults", [["Standard Hours", standard], ["Hours Recorded This Period", recorded], ["TOIL Balance", toil], ["Opening SOG Balance", openingSog, "Carried over from previous fortnight"], ["Net SOG for the Period", netBalance], ["Closing SOG Balance", openingSog + netBalance, "Carries forward to next fortnight"]]);
-  } else metricList("fortnightResults", [["Standard Hours", standard], ["Hours Recorded This Period", recorded], ["TOIL Balance", toil], ["Opening Flex Balance", carriedFlex, "Carried over from previous fortnight"], ["Net Flex for the Period", netBalance], ["Closing Flex Balance", endFlex, "Carries forward to next fortnight"]]);
+    metricList("fortnightResults", [["Standard Hours", standard], ["Hours Recorded This Period", recorded], ["Opening SOG Balance", openingSog], ["Net SOG for the Period", netBalance], ["Closing SOG Balance", openingSog + netBalance], ["TOIL Balance", toil]]);
+  } else metricList("fortnightResults", [["Standard Hours", standard], ["Hours Recorded This Period", recorded], ["Opening Flex Balance", carriedFlex], ["Net Flex for the Period", netBalance], ["Closing Flex Balance", endFlex], ["TOIL Balance", toil]]);
 }
 
 function renderRecords(calc) {
-  const balanceLabel = C.isSeniorOfficer(draft.attendanceType) ? "SOG" : "Flex";
+  const balanceLabel = C.isSeniorOfficer(historicalMode ? state.settings.attendanceType : draft.attendanceType) ? "SOG" : "Flex";
   el("dailyBalanceHeading").textContent = `Daily ${balanceLabel}`;
   el("progressiveBalanceHeading").textContent = `Progressive ${balanceLabel}`;
   const end = viewStart ? C.addDays(viewStart, 13) : "";
-  const dates = Object.keys(state.records).filter(date => viewStart && date >= viewStart && date <= end).sort();
-  el("recordsBody").innerHTML = dates.length ? dates.map(date => { const d = calc[date], senior = C.isSeniorOfficer(state.records[date].attendanceType); return `<tr><td>${formatDisplayDate(date)}</td><td>${d ? C.formatDuration(d.daily) || "Incomplete" : "—"}</td><td>${d ? C.formatDuration(senior ? d.dailySog : d.dailyFlex) || "—" : "—"}</td><td>${d ? C.formatDuration(senior ? d.progressiveSog : d.progressiveFlex) : "—"}</td><td>${d ? C.formatDuration(d.progressiveToil) : "—"}</td><td class="row-actions"><button class="link-button" data-edit="${date}">Edit</button><button class="link-button danger" data-delete="${date}">Delete</button></td></tr>`; }).join("") : `<tr><td colspan="6" class="muted">No records yet.</td></tr>`;
+  const dates = Object.keys(editableRecords()).filter(date => viewStart && date >= viewStart && date <= end).sort();
+  const hideActions = dates.length ? dates.every(date => submittedPeriodLocked(date)) : submittedPeriodLocked(viewStart);
+  el("recordActionsHeading").hidden = hideActions;
+  el("recordsBody").innerHTML = dates.length ? dates.map(date => {
+    const d = calc[date], senior = C.isSeniorOfficer(editableRecords()[date].attendanceType);
+    const actions = submittedPeriodLocked(date) ? "" : `<td class="row-actions"><button class="link-button" data-edit="${date}">Edit</button><button class="link-button danger" data-delete="${date}">Delete</button></td>`;
+    return `<tr data-record-date="${date}"><td>${formatDisplayDate(date)}</td><td>${d ? C.formatDuration(d.daily) || "Incomplete" : "—"}</td><td>${d ? C.formatDuration(senior ? d.dailySog : d.dailyFlex) || "—" : "—"}</td><td>${d ? C.formatDuration(senior ? d.progressiveSog : d.progressiveFlex) : "—"}</td><td>${d ? C.formatDuration(d.progressiveToil) : "—"}</td>${actions}</tr>`;
+  }).join("") : `<tr><td colspan="${hideActions ? 5 : 6}" class="muted">No records yet.</td></tr>`;
+  document.querySelectorAll("[data-edit], [data-delete]").forEach(button => {
+    button.disabled = (historicalMode && historicalEditStart !== viewStart) || submittedPeriodLocked(button.dataset.edit || button.dataset.delete);
+    if (button.disabled) button.title = "Choose Edit Timesheet to enable historical editing.";
+  });
   document.querySelectorAll("[data-edit]").forEach(button => button.addEventListener("click", () => { if (requestRecordOpen(button.dataset.edit, "edit")) scrollTo({top:0, behavior:"smooth"}); }));
   document.querySelectorAll("[data-delete]").forEach(button => button.addEventListener("click", () => deleteRecord(button.dataset.delete)));
 }
 
-function renderFortnightStatus() {
-  const badge = el("fortnightStatus");
-  if (!fortnightCalculationAllowed() || !viewStart) { badge.textContent = "Setup required"; badge.classList.remove("status-overdue"); return; }
-  const submission = state.submissions[viewStart] || {};
+function historicalResubmissionActive(start) {
+  return Boolean(historicalSession?.start === start && historicalEditAllowed(start));
+}
+function fortnightStatusFor(start) {
+  if (!fortnightCalculationAllowed() || !start) return "Setup required";
+  if (historicalResubmissionActive(start)) return "To be submitted";
+  const submission = state.submissions[start] || {};
   const currentStart = periodFor(todayISO()).start;
-  if (submission.submitted && !submission.changed) badge.textContent = "Submitted";
-  else if (C.addDays(viewStart, 13) < todayISO()) badge.textContent = "Overdue";
-  else if (viewStart === currentStart) badge.textContent = "Current";
-  else badge.textContent = "Upcoming";
-  badge.classList.toggle("status-overdue", badge.textContent === "Overdue");
+  if (submission.submitted && !submission.changed) return "Submitted";
+  if (C.addDays(start, 13) < todayISO()) return "Overdue";
+  return start === currentStart ? "Current" : "Upcoming";
+}
+function renderFortnightStatus() {
+  for (const [id, start] of [["fortnightStatus", viewStart], ["dailyEntryStatus", periodFor(activeDate).start], ["calculatedDateStatus", periodFor(activeDate).start]]) {
+    const badge = el(id);
+    badge.textContent = fortnightStatusFor(start);
+    badge.classList.toggle("status-overdue", badge.textContent === "Overdue");
+  }
 }
 
 function renderSubmissionReminder() {
   const box = el("submissionReminder"); reminderStart = "";
+  const historical = sessionContains(activeDate) && historicalResubmissionActive(periodFor(activeDate).start);
+  el("resubmitHistoricalReminder").hidden = !historical;
+  el("markSubmitted").hidden = historical;
+  if (historical) {
+    box.hidden = false; setPrimaryLayoutState(true);
+    el("submissionMessage").textContent = "Historical timesheet awaiting resubmission";
+    el("submissionPeriod").textContent = "You are editing a previously submitted fortnight. Please resubmit it when you have finished making changes.";
+    return;
+  }
   if (!fortnightCalculationAllowed()) { box.hidden = true; setPrimaryLayoutState(false); return; }
   const today = todayISO();
   const currentStart = C.fortnightFor(today, state.settings.fortnightStart).start;
   const previousStart = C.addDays(currentStart, -14);
-  const starts = new Set(Object.keys(state.records).map(date => C.fortnightFor(date, state.settings.fortnightStart).start));
+  const starts = new Set(Object.keys(editableRecords()).map(date => C.fortnightFor(date, state.settings.fortnightStart).start));
   starts.add(currentStart); starts.add(previousStart);
   Object.keys(state.submissions).forEach(start => starts.add(start));
   const candidates = [...starts].map(start => ({ start, end: C.addDays(start, 13), submission: state.submissions[start] || {} })).filter(period => {
     if (period.submission.changed) return true;
     if (period.submission.submitted) return false;
-    const hasRecords = Object.keys(state.records).some(date => date >= period.start && date <= period.end);
+    const hasRecords = Object.keys(editableRecords()).some(date => date >= period.start && date <= period.end);
     return today === period.end || (today > period.end && (hasRecords || period.start === previousStart));
   }).sort((a, b) => {
     if (a.start === viewStart) return -1;
@@ -810,10 +1163,19 @@ function setPrimaryLayoutState(actionable) {
 }
 
 function markFortnightSubmitted() {
+  if (historicalSession) { if (reminderStart === historicalSession.start) resubmitHistoricalEdit(); else showStatus("Resubmit or Cancel the historical session before marking another period submitted.", true); return; }
   if (!reminderStart) return;
   const submittedStart = reminderStart;
+  if (activeDate >= submittedStart && activeDate <= C.addDays(submittedStart, 13) && draftIsDirty()) {
+    if (!confirm("Save the unsaved Daily Entry as a draft before marking this fortnight submitted?")) return;
+    if (!saveDraft()) return;
+  }
+  const previousSubmission = state.submissions[submittedStart] ? clone(state.submissions[submittedStart]) : null;
   state.submissions[submittedStart] = { submitted: true, changed: false, submittedAt: new Date().toISOString() };
-  save(); renderAll(); showStatus("Fortnight marked as submitted.");
+  if (!save()) { if (previousSubmission) state.submissions[submittedStart] = previousSubmission; else delete state.submissions[submittedStart]; return; }
+  if (historicalEditStart === submittedStart) revokeHistoricalEdit();
+  if (submittedPeriodLocked()) loadRecord(activeDate, true); else renderAll();
+  showStatus("This fortnight has been submitted. You can no longer edit its entries directly. To make changes, go to Historical Timesheets, select the relevant fortnight, and click Edit Timesheet.");
 }
 
 function renderSettings() {
@@ -845,6 +1207,7 @@ function updateConfigurationValidity() {
   el("submitRecord").disabled = !fortnightCalculationAllowed();
 }
 function saveSettings() {
+  if (historicalSession) { setSettingsStatus("Resubmit or Cancel historical editing before changing settings.", true); return; }
   const start = el("fortnightStart").value;
   if (!start) { const message = "Fortnight Start Date is required and must be a Thursday."; setSettingsStatus(message, true); alert(message); el("fortnightStart").focus(); return; }
   if (!C.isThursdayISO(start)) { const message = "Fortnight Start Date must be a Thursday."; setSettingsStatus(message, true); alert(message); el("fortnightStart").focus(); return; }
@@ -856,9 +1219,10 @@ function saveSettings() {
   const invalid = durationInputs.find(([, input]) => C.parseDuration(input.value) == null);
   if (invalid) { const message = `${invalid[0]} must use H:MM format, for example 7:21.`; setSettingsStatus(message, true); alert(message); invalid[1].focus(); return; }
   const previousSettings = state.settings;
-  state.settings = JSON.parse(settingsSnapshot()); viewStart = periodFor(activeDate).start;
+  state.settings = JSON.parse(settingsSnapshot());
   if (!save()) { state.settings = previousSettings; setSettingsStatus("Settings could not be saved to localStorage.", true); return; }
-  if (!editMode) { draft.attendanceType = state.settings.attendanceType; originalDraft.attendanceType = state.settings.attendanceType; updateLeaveTypeOptions(); }
+  if (historicalEditStart) { revokeHistoricalEdit(); loadRecord(activeDate, true); }
+  if (!editMode && !submittedPeriodLocked()) { draft.attendanceType = state.settings.attendanceType; originalDraft.attendanceType = state.settings.attendanceType; updateLeaveTypeOptions(); }
   originalSettings = settingsSnapshot(); renderAll(); setSettingsStatus("Settings saved"); showStatus("Settings saved. All balances have been recalculated."); setSettingsExpanded(false);
 }
 function openResetHistoryModal() {
@@ -877,13 +1241,13 @@ function resetTimesheetHistory() {
   const previousState = state;
   state = { records:{}, submissions:{}, drafts:clone(state.drafts), activeDraftDate:state.activeDraftDate, settings:clone(state.settings) };
   if (!save()) { state = previousState; return; }
+  revokeHistoricalEdit();
   pendingRecordSubmission = null;
   reminderStart = "";
   editMode = false;
   interruptionEditorSequence = 0;
   draft = emptyRecord(state.settings.attendanceType);
   originalDraft = clone(draft);
-  if (validAnchor()) viewStart = periodFor(activeDate).start;
   fillForm(draft);
   closeInterruptionEditor();
   renderInterruptionList();
@@ -901,9 +1265,9 @@ function formatCsvDate(iso) {
   return `${day}-${month}-${year}`;
 }
 function buildCsvPackage(start = viewStart) {
-  const period = { start, end: C.addDays(start, 13) };
+  const period = periodFor(start);
   const headers = ["Date", "Start Time", "Morning Out", "Morning In", "Lunch Out", "Lunch In", "Afternoon Out", "Afternoon In", "Finish Time", "Leave Type", "Leave Hours", "Standard Hours", "Attendance Type", "TOIL Hours", "Daily Hours"];
-  const exportRows = C.buildFortnightExportRows(state.records, state.settings, start).map(([date, ...values]) => [formatCsvDate(date), ...values]);
+  const exportRows = C.buildFortnightExportRows(state.records, state.settings, period.start).map(([date, ...values]) => [formatCsvDate(date), ...values]);
   const rows = [headers, ...exportRows];
   const csv = rows.map(row => row.map(value => `"${String(value ?? "").replaceAll('"','""')}"`).join(",")).join("\r\n");
   const filename = `Timesheet_${period.start}_to_${period.end}.csv`;
@@ -1063,7 +1427,6 @@ function prepareFeedback(options = {}) {
 }
 
 buildUI(); renderSettings(); setSettingsExpanded(false); setHistoricalExpanded(false);
-if (validAnchor()) viewStart = periodFor(activeDate).start;
 loadRecord(activeDate, true);
 openWelcomeModal();
 if (!validAnchor() && !TEST_MODE) setTimeout(anchorReminder, 0);

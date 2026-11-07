@@ -108,7 +108,9 @@
   }
 
   function fortnightFor(date, anchor) {
-    const difference = Math.floor((dateFromISO(date) - dateFromISO(anchor)) / 86400000);
+    // Compare calendar days in UTC; local midnights can be 23 or 25 hours apart at DST changes.
+    const calendarDay = iso => { const [year, month, day] = iso.split("-").map(Number); return Date.UTC(year, month - 1, day) / 86400000; };
+    const difference = calendarDay(date) - calendarDay(anchor);
     const offset = ((difference % 14) + 14) % 14;
     const start = addDays(date, -offset);
     return { start, end: addDays(start, 13) };
