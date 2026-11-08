@@ -78,18 +78,26 @@
     return { morning, afternoon, daily, dailyFlex, dailySog, toilEarned: toil, incomplete: !valid };
   }
 
-  function dateFromISO(iso) { const [y, m, d] = iso.split("-").map(Number); return new Date(y, m - 1, d); }
-  function isoFromDate(date) { return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,"0")}-${String(date.getDate()).padStart(2,"0")}`; }
-  function addDays(iso, days) { const date = dateFromISO(iso); date.setDate(date.getDate() + days); return isoFromDate(date); }
-  function standardFor(date, settings) { return parseDuration(settings.standardByDay[dateFromISO(date).getDay()]) || 0; }
-  function isThursdayISO(date) { return Boolean(date) && /^\d{4}-\d{2}-\d{2}$/.test(date) && dateFromISO(date).getDay() === 4; }
+  function dateFromISO(iso) {
+    const match = /^(\d{4,6})-(\d{2})-(\d{2})$/.exec(iso || "");
+    if (!match) return new Date(NaN);
+    const [, y, m, d] = match.map(Number), date = new Date(0);
+    date.setUTCFullYear(y, m - 1, d); date.setUTCHours(0, 0, 0, 0);
+    return date.getUTCFullYear() === y && date.getUTCMonth() === m - 1 && date.getUTCDate() === d ? date : new Date(NaN);
+  }
+  function isoFromDate(date) { return Number.isFinite(date.getTime()) ? `${String(date.getUTCFullYear()).padStart(4,"0")}-${String(date.getUTCMonth()+1).padStart(2,"0")}-${String(date.getUTCDate()).padStart(2,"0")}` : ""; }
+  function calendarDay(iso) { return dateFromISO(iso).getTime() / 86400000; }
+  function isValidISODate(iso) { return Number.isFinite(calendarDay(iso)); }
+  function addDays(iso, days) { const date = dateFromISO(iso); date.setUTCDate(date.getUTCDate() + days); return isoFromDate(date); }
+  function standardFor(date, settings) { return parseDuration(settings.standardByDay[dateFromISO(date).getUTCDay()]) || 0; }
+  function isThursdayISO(date) { return isValidISODate(date) && dateFromISO(date).getUTCDay() === 4; }
 
   function recalculate(records, settings) {
     let flex = parseDuration(settings.openingFlex) || 0;
     let sog = 0;
     let toil = parseDuration(settings.openingToil) || 0;
     const calculated = {};
-    Object.keys(records).sort().forEach(date => {
+    Object.keys(records).sort((a,b) => calendarDay(a) - calendarDay(b)).forEach(date => {
       const day = calculateDay(records[date], standardFor(date, settings));
       const seniorOfficer = isSeniorOfficer(records[date].attendanceType);
       if (seniorOfficer) {
@@ -108,9 +116,10 @@
   }
 
   function fortnightFor(date, anchor) {
-    // Compare calendar days in UTC; local midnights can be 23 or 25 hours apart at DST changes.
-    const calendarDay = iso => { const [year, month, day] = iso.split("-").map(Number); return Date.UTC(year, month - 1, day) / 86400000; };
+    // Civil dates have no time zone. UTC arithmetic also handles years 0001–0099
+    // and calendar dates skipped by a local time-zone/dateline transition.
     const difference = calendarDay(date) - calendarDay(anchor);
+    if (!Number.isFinite(difference)) return {start:"", end:""};
     const offset = ((difference % 14) + 14) % 14;
     const start = addDays(date, -offset);
     return { start, end: addDays(start, 13) };
@@ -134,13 +143,13 @@
   }
 
   function fortnightsOverlappingMonth(year, month, anchor) {
-    const monthStart = `${year}-${String(month).padStart(2, "0")}-01`;
-    const lastDate = new Date(year, month, 0);
+    const monthStart = `${String(year).padStart(4,"0")}-${String(month).padStart(2, "0")}-01`;
+    const lastDate = dateFromISO(monthStart); lastDate.setUTCMonth(lastDate.getUTCMonth() + 1); lastDate.setUTCDate(0);
     const monthEnd = isoFromDate(lastDate);
     const starts = [];
-    for (let start = fortnightFor(monthStart, anchor).start; start <= monthEnd; start = addDays(start, 14)) starts.push(start);
+    for (let start = fortnightFor(monthStart, anchor).start; start && calendarDay(start) <= calendarDay(monthEnd); start = addDays(start, 14)) starts.push(start);
     return starts;
   }
 
-  return { TIME_KEYS, parseDuration, formatDuration, calculateDay, recalculate, fortnightFor, standardFor, addDays, isThursdayISO, isSeniorOfficer, buildFortnightExportRows, fortnightsOverlappingMonth };
+  return { TIME_KEYS, parseDuration, formatDuration, calculateDay, recalculate, fortnightFor, standardFor, addDays, calendarDay, isValidISODate, isThursdayISO, isSeniorOfficer, buildFortnightExportRows, fortnightsOverlappingMonth };
 });

@@ -20,5 +20,5 @@ for (const asset of shell.APP_SHELL) {
 assert(cached.has(new URL("./index.html", base).href));
 assert(cached.has(new URL("./assets/clocky-hero-office.jpeg", base).href));
 assert(handlers.install && handlers.activate && handlers.fetch);
-assert.equal(shell.CACHE_NAME, "clocky-shell-v22");
+assert.equal(shell.CACHE_NAME, "clocky-shell-v23");
 console.log("Service-worker manifest matches every essential HTML asset and all files exist.");

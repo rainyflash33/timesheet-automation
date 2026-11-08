@@ -1,12 +1,13 @@
 const CACHE_PREFIX = "clocky-shell-";
-const CACHE_NAME = `${CACHE_PREFIX}v22`;
+const CACHE_NAME = `${CACHE_PREFIX}v23`;
 const APP_SHELL = [
   "./",
   "./index.html",
-  "./styles.css?v=clocky-release-v22",
-  "./calculator.js?v=clocky-release-v22",
-  "./app.js?v=clocky-release-v22",
-  "./pwa-register.js?v=clocky-release-v22",
+  "./styles.css?v=clocky-release-v23",
+  "./calculator.js?v=clocky-release-v23",
+  "./periods.js?v=clocky-release-v23",
+  "./app.js?v=clocky-release-v23",
+  "./pwa-register.js?v=clocky-release-v23",
   "./manifest.webmanifest?v=clocky-icon-v2",
   "./assets/clocky-hero-office.jpeg",
   "./assets/icons/clocky-icon-192.png?v=clocky-icon-v2",

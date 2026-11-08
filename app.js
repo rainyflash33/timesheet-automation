@@ -1,4 +1,5 @@
 const C = TimesheetCalc;
+const P = ClockyPeriods;
 const STORAGE_KEY = "personal-timesheet-v1";
 const TEST_MODE = new URLSearchParams(window.location.search).has("test");
 const LEAVE_TYPES = ["", "Other", "Prior to Commencement", "Christmas Shutdown", "Public Holiday", "Long Service", "Maternity", "Bonding", "Primary Care Giver", "Purchased", "Without Pay", "Compassionate", "Study", "Time off in Lieu (TOIL)", "Recovery Leave (SOGA/B)", "Flex", "Annual", "Personal (No Certificate)", "Personal (Certificate)"];
@@ -9,7 +10,10 @@ const RECORD_FIELDS = [...C.TIME_KEYS, "leaveType", "leaveHours", "attendanceTyp
 const DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 const todayISO = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`; };
 const defaults = { records: {}, submissions: {}, drafts: {}, activeDraftDate:"", settings: { attendanceType: "Flextime", fortnightStart: "", openingFlex: "0:00", openingToil: "0:00", standardByDay: ["0:00", "7:21", "7:21", "7:21", "7:21", "7:21", "0:00"] } };
-let state = load();
+let persistedStateRaw = null;
+let storageReadError = "";
+let state = load(true);
+let periodCalendarCache = null;
 let activeDate = initialRecordDate();
 let viewStart = "";
 let historicalStart = "";
@@ -40,14 +44,25 @@ let submittedWarningMainInert = false;
 
 function clone(value) { return JSON.parse(JSON.stringify(value)); }
 function el(id) { return document.getElementById(id); }
-function load() {
+function load(track = false) {
   try {
-    const saved = JSON.parse(localStorage.getItem(STORAGE_KEY));
-    return saved ? { records: saved.records || {}, submissions: saved.submissions || {}, drafts: saved.drafts || {}, activeDraftDate: saved.activeDraftDate || "", settings: { ...defaults.settings, ...saved.settings } } : clone(defaults);
-  } catch { return clone(defaults); }
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (track) { persistedStateRaw = raw; storageReadError = ""; }
+    const saved = JSON.parse(raw);
+    if (saved === null) return clone(defaults);
+    if (typeof saved !== "object" || Array.isArray(saved) || ["records","submissions","drafts","settings"].some(key => saved[key] != null && (typeof saved[key] !== "object" || Array.isArray(saved[key])))) throw new Error("Saved data has an unsupported structure.");
+    if (Object.entries(saved.records || {}).some(([date, record]) => !C.isValidISODate(date) || !record || typeof record !== "object" || Array.isArray(record))) throw new Error("A saved record has an invalid date or structure.");
+    if (Object.entries(saved.drafts || {}).some(([date, entry]) => !C.isValidISODate(date) || !entry?.record || typeof entry.record !== "object" || Array.isArray(entry.record))) throw new Error("A saved draft has an invalid date or structure.");
+    if (saved.settings?.standardByDay && (!Array.isArray(saved.settings.standardByDay) || saved.settings.standardByDay.length !== 7 || saved.settings.standardByDay.some(value => C.parseDuration(value) == null))) throw new Error("Saved standard hours need review.");
+    return { ...saved, records: saved.records || {}, submissions: saved.submissions || {}, drafts: saved.drafts || {}, activeDraftDate: saved.activeDraftDate || "", settings: { ...defaults.settings, ...saved.settings } };
+  } catch (error) { if (track) storageReadError = error.message; return clone(defaults); }
 }
 function save() {
-  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); return true; }
+  try {
+    if (storageReadError) { alert("Saved timesheet data needs review. No data has been changed. Use the read-only diagnostic before saving."); return false; }
+    if (localStorage.getItem(STORAGE_KEY) !== persistedStateRaw) { alert("Stored timesheet data changed in another window. Your input has been kept. Review or copy it before reloading; no data has been overwritten."); return false; }
+    const raw = JSON.stringify(state); localStorage.setItem(STORAGE_KEY, raw); persistedStateRaw = raw; return true;
+  }
   catch (error) { alert(`The app could not save to local storage: ${error.message}`); return false; }
 }
 function emptyRecord(attendanceType = "Flextime") { return { startTime:"", morningOut:"", morningIn:"", lunchOut:"", lunchIn:"", afternoonOut:"", afternoonIn:"", finishTime:"", leaveType:"", leaveHours:"", attendanceType, toilHours:"" }; }
@@ -56,7 +71,7 @@ function formatDisplayDate(iso, style = "history") {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso || "");
   if (!match) return iso || "";
   const [, year, month, day] = match;
-  const date = new Date(Date.UTC(Number(year), Number(month) - 1, Number(day)));
+  const date = new Date(C.calendarDay(iso) * 86400000);
   const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
   const weekdays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
   if (style === "range") return `${Number(day)} ${months[Number(month) - 1]} ${year}`;
@@ -66,10 +81,10 @@ function formatRecordDate(iso) {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso || "");
   if (!match) return "";
   const [, year, month, day] = match;
-  const localDate = new Date(Number(year), Number(month) - 1, Number(day));
+  const localDate = new Date(C.calendarDay(iso) * 86400000);
   const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
   const weekdays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-  return `${day} ${months[Number(month) - 1]} ${year} ${weekdays[localDate.getDay()]}`;
+  return `${day} ${months[Number(month) - 1]} ${year} ${weekdays[localDate.getUTCDay()]}`;
 }
 function formatReminderDate(iso) {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso || "");
@@ -81,7 +96,7 @@ function renderRecordDate() { el("recordDateDisplay").textContent = formatRecord
 function weekdayForISO(iso) {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso || "");
   if (!match) return null;
-  return new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3])).getDay();
+  return C.isValidISODate(iso) ? new Date(C.calendarDay(iso) * 86400000).getUTCDay() : null;
 }
 function isWeekendISO(iso) { const weekday = weekdayForISO(iso); return weekday === 0 || weekday === 6; }
 function updateLeaveTypeOptions() {
@@ -93,7 +108,7 @@ function updateLeaveTypeOptions() {
 }
 function validAnchor() { return C.isThursdayISO(state.settings.fortnightStart); }
 function selectedAnchorValid() { return C.isThursdayISO(el("fortnightStart")?.value || ""); }
-function fortnightCalculationAllowed() { return validAnchor() && selectedAnchorValid(); }
+function fortnightCalculationAllowed() { return validAnchor() && selectedAnchorValid() && !storageReadError; }
 function anchorReminder() { alert("Set a Fortnight Start Date before submitting records. The fortnight must start on a Thursday."); }
 function ensureValidAnchor() {
   const selected = el("fortnightStart").value;
@@ -220,6 +235,13 @@ function buildUI() {
   el("feedbackImprove").addEventListener("input", () => { el("feedbackImproveError").hidden = true; el("feedbackImprove").removeAttribute("aria-invalid"); });
   document.querySelectorAll('[name="feedbackRating"]').forEach(input => input.addEventListener("change", () => { el("feedbackRatingError").hidden = true; }));
   el("markSubmitted").addEventListener("click", markFortnightSubmitted);
+  window.addEventListener("storage", event => {
+    if (event.key !== STORAGE_KEY && event.key !== null) return;
+    if (historicalSession || draftIsDirty() || settingsAreDirty()) { renderAll(); showStatus("Stored data changed in another window. Your input is preserved and saving is blocked until you review or copy it and reload.", true); return; }
+    const date = activeDate, browsing = historicalMode, selection = historicalStart, editing = editMode;
+    revokeHistoricalEdit(); state = load(true); renderSettings(); loadRecord(date, true, editing ? "edit" : "new"); historicalMode = browsing; historicalStart = selection; renderAll();
+    showStatus(storageReadError ? "Saved data needs review. No data has been changed." : "Stored timesheets refreshed from another window.", Boolean(storageReadError));
+  });
   window.addEventListener("beforeunload", event => { if (draftIsDirty() || settingsAreDirty() || historicalSessionHasChanges()) { event.preventDefault(); event.returnValue = ""; } });
 }
 
@@ -355,7 +377,7 @@ function confirmCopyPrevious() {
 
 function removeSavedDraft(date) {
   if (sessionContains(date)) { const existed = Boolean(historicalSession.drafts[date]); delete historicalSession.drafts[date]; return existed; }
-  if (!ensureRecordWritable(date)) return false;
+  if (!periodContext(date).canSaveDraft) return false;
   if (!state.drafts[date]) return false;
   delete state.drafts[date];
   if (state.activeDraftDate === date) state.activeDraftDate = Object.keys(state.drafts).slice(-1)[0] || "";
@@ -363,7 +385,7 @@ function removeSavedDraft(date) {
 }
 
 function saveDraft({showSubmittedWarning = false} = {}) {
-  if (!guardDailySaveAttempt(showSubmittedWarning)) return false;
+  if (!guardDailySaveAttempt(showSubmittedWarning, "draft")) return false;
   if (!validateClockInputs("[data-record-time]")) return;
   if (!validateDurationInputs("[data-record-duration]")) return;
   draft = readForm();
@@ -438,7 +460,6 @@ function classifyInterruption(out, incoming, record) {
   return "";
 }
 function stageInterruptionEditors() {
-  if (!ensureRecordWritable(activeDate)) return false;
   const editors = [...document.querySelectorAll(".interruption-editor")];
   if (!editors.length) return true;
   if (!validateClockInputs("[data-interruption-time]")) return false;
@@ -490,12 +511,22 @@ function cancelLeaveToil() {
 }
 
 function periodFor(date) { return C.fortnightFor(date, state.settings.fortnightStart); }
+function periodCalendar() {
+  const anchor = state.settings.fortnightStart, signature = JSON.stringify(state.submissions);
+  if (!periodCalendarCache || periodCalendarCache.anchor !== anchor || periodCalendarCache.signature !== signature) periodCalendarCache = {anchor, signature, calendar:P.createCalendar(state.submissions, anchor)};
+  return periodCalendarCache.calendar;
+}
+function periodContext(date = activeDate) {
+  let storageConflict = false;
+  try { storageConflict = localStorage.getItem(STORAGE_KEY) !== persistedStateRaw; } catch { storageReadError ||= "Browser storage cannot be checked."; }
+  return periodCalendar().resolve(date, {today:todayISO(), authorization:historicalEditStart === historicalEditAuthorization?.start ? historicalEditAuthorization : null, session:historicalSession, storageError:storageReadError, storageConflict});
+}
 function periodEntries(records, start) {
-  const end = C.addDays(start, 13);
-  return Object.fromEntries(Object.entries(records).filter(([date]) => date >= start && date <= end));
+  const id = periodFor(start).start;
+  return Object.fromEntries(Object.entries(records).filter(([date]) => id && periodFor(date).start === id));
 }
 function sessionContains(date) {
-  return Boolean(historicalSession && date >= historicalSession.start && date <= C.addDays(historicalSession.start, 13));
+  return Boolean(historicalSession && periodFor(date).start === historicalSession.start);
 }
 function editableRecords() {
   if (!historicalSession) return state.records;
@@ -584,7 +615,7 @@ function commitHistoricalResubmission(session, confirmation) {
   const candidate = clone(state), previousState = state;
   Object.keys(periodEntries(candidate.records, session.start)).forEach(date => delete candidate.records[date]);
   Object.assign(candidate.records, records);
-  candidate.submissions[session.start] = {...session.originalSubmission, submitted:true, changed:false, submittedAt:new Date().toISOString()};
+  candidate.submissions[session.start] = periodCalendar().stamp(session.start, session.originalSubmission || {}, new Date().toISOString());
   session.touched.forEach(date => delete candidate.drafts[date]);
   if (session.touched.has(candidate.activeDraftDate)) candidate.activeDraftDate = Object.keys(candidate.drafts).slice(-1)[0] || "";
   state = candidate;
@@ -594,36 +625,22 @@ function commitHistoricalResubmission(session, confirmation) {
   return true;
 }
 function submittedPeriodsFor(start) {
-  const end = C.addDays(start, 13);
-  return Object.fromEntries(Object.entries(state.submissions).filter(([storedStart, status]) => /^\d{4}-\d{2}-\d{2}$/.test(storedStart) && status?.submitted && storedStart <= end && C.addDays(storedStart, 13) >= start));
+  return periodContext(start).sourceEntries;
 }
 function submissionForPeriod(start) {
-  const exact = state.submissions[start];
-  if (exact?.submitted || !validAnchor()) return exact || {};
-  // Older releases stored starts shifted by DST. Read them using the current
-  // calendar period without migrating or deleting any saved submission status.
-  const legacy = Object.entries(state.submissions).find(([storedStart, status]) => /^\d{4}-\d{2}-\d{2}$/.test(storedStart) && status?.submitted && periodFor(storedStart).start === start);
-  return legacy?.[1] || exact || {};
+  return periodContext(start).submission;
 }
 function submittedPeriodStart(date) {
-  if (validAnchor() && /^\d{4}-\d{2}-\d{2}$/.test(date)) {
-    const start = periodFor(date).start;
-    if (submissionForPeriod(start).submitted) return start;
-  }
-  // Preserve protection for every date in an original stored submitted range.
-  return Object.keys(state.submissions).find(start => /^\d{4}-\d{2}-\d{2}$/.test(start) && state.submissions[start]?.submitted && date >= start && date <= C.addDays(start, 13)) || "";
+  const period = periodContext(date); return period.submitted ? period.start : "";
 }
 function historicalEditAllowed(date) {
-  const permission = historicalEditAuthorization;
-  return Boolean(permission && historicalEditStart === permission.start && permission.anchor === state.settings.fortnightStart && validAnchor() && periodFor(date).start === permission.start && (!submittedPeriodStart(date) || (historicalSession && historicalSession.id === permission.id && historicalSession.start === permission.start)));
+  return periodContext(date).authorized;
 }
 function submittedPeriodLocked(date = activeDate) {
-  return Boolean(submittedPeriodStart(date) && !historicalEditAllowed(date));
+  const period = periodContext(date); return period.submitted && !period.authorized;
 }
 function ensureRecordWritable(date) {
-  if (historicalSession && !sessionContains(date)) return false;
-  if (!submittedPeriodLocked(date)) return true;
-  return false;
+  return periodContext(date).canEditRecord;
 }
 function meaningfulDailyChanges() {
   const current = readForm();
@@ -638,13 +655,18 @@ function meaningfulDailyChanges() {
       normalise("morningOut", editor.querySelector("[data-interruption-out]").value) !== normalise("morningOut", editor.dataset.originalOut) ||
       normalise("morningIn", editor.querySelector("[data-interruption-in]").value) !== normalise("morningIn", editor.dataset.originalIn));
 }
-function guardDailySaveAttempt(showWarning) {
-  if (submittedPeriodLocked()) {
+function guardDailySaveAttempt(showWarning, mode = "record") {
+  const period = periodContext();
+  if (period.storageConflict) { showStatus("Stored timesheets changed in another window. Your input is preserved; review or copy it before reloading. No data has been overwritten.", true); return false; }
+  if (period.requiresReview || storageReadError) { showStatus("Saved submission identifiers or data need calendar review. No data has been changed. Use the read-only period diagnostic before editing.", true); return false; }
+  if (period.submitted && !period.authorized) {
     if (showWarning) openSubmittedWarning();
     return false;
   }
-  if (historicalSession && !sessionContains(activeDate)) { showStatus("Resubmit or Cancel historical editing before changing another fortnight.", true); return false; }
-  return true;
+  if (period.otherSession) { showStatus("Resubmit or Cancel historical editing before changing another fortnight.", true); return false; }
+  try { if (localStorage.getItem(STORAGE_KEY) !== persistedStateRaw) { showStatus("Stored timesheets changed in another window. Your input is preserved; review or copy it before reloading. No data has been overwritten.", true); return false; } }
+  catch { showStatus("Browser storage could not be checked. Your input is preserved and no data has been changed.", true); return false; }
+  return mode === "draft" ? period.canSaveDraft : period.canEditRecord;
 }
 function openSubmittedWarning() {
   if (!el("submittedWarningModal").hidden) return;
@@ -680,8 +702,8 @@ function leaveHistoricalEditing() {
 }
 
 function formatPeriod(start) {
-  const formatter = new Intl.DateTimeFormat("en-AU", { day:"numeric", month:"short", year:"numeric" });
-  const localDate = iso => { const [y,m,d] = iso.split("-").map(Number); return new Date(y,m-1,d); };
+  const formatter = new Intl.DateTimeFormat("en-AU", { day:"numeric", month:"short", year:"numeric", timeZone:"UTC" });
+  const localDate = iso => new Date(C.calendarDay(iso) * 86400000);
   return `${formatter.format(localDate(start))} – ${formatter.format(localDate(C.addDays(start, 13)))}`;
 }
 function rebuildFortnightSelector() {
@@ -692,7 +714,7 @@ function rebuildFortnightSelector() {
   }
   yearSelect.disabled = monthSelect.disabled = selector.disabled = false;
   const knownDates = [todayISO(), activeDate, state.settings.fortnightStart, ...Object.keys(state.records), ...Object.keys(state.drafts), ...Object.keys(state.submissions)];
-  const years = knownDates.map(date => Number(date.slice(0, 4)));
+  const years = knownDates.filter(C.isValidISODate).map(date => Number(date.slice(0, 4)));
   const minYear = Math.min(filterYear, ...years), maxYear = Math.max(filterYear, ...years);
   yearSelect.innerHTML = Array.from({length:maxYear-minYear+1}, (_, i) => minYear+i).map(year => `<option value="${year}"${year === filterYear ? " selected" : ""}>${year}</option>`).join("");
   const monthNames = Array.from({length:12}, (_, i) => new Intl.DateTimeFormat("en-AU", {month:"long"}).format(new Date(2020, i, 1)));
@@ -714,7 +736,7 @@ function changePeriodFilter(year, month) {
 function changeFortnight(start) {
   if (historicalSession) { requestHistoricalExit(() => changeFortnight(start)); if (historicalSession) rebuildFortnightSelector(); return; }
   if (!leaveHistoricalEditing()) { rebuildFortnightSelector(); return; }
-  historicalStart = start; historicalMode = true;
+  historicalStart = periodFor(start).start; historicalMode = true;
   el("historicalEditStatus").textContent = "";
   renderAll();
 }
@@ -725,8 +747,9 @@ function openHistoricalEdit() {
     requestHistoricalExit(() => openHistoricalEdit()); return;
   }
   if (!ensureValidAnchor()) return;
+  if (periodContext(historicalStart).requiresReview) { showStatus("This calendar has submission identifiers requiring review. Use the read-only diagnostic before historical editing.", true); return; }
   pendingHistoricalEdit = historicalStart;
-  el("historicalSubmittedNotice").hidden = !Object.keys(submittedPeriodsFor(historicalStart)).length;
+  el("historicalSubmittedNotice").hidden = !periodContext(historicalStart).submitted;
   el("historicalDraftNotice").hidden = !draftIsDirty();
   el("historicalDraftNotice").textContent = submittedPeriodLocked() ? "Your temporary Daily Entry changes will remain in the form. They will not be saved until you explicitly save them in authorised historical editing." : "Your Daily Entry has unsaved changes. Continue Editing will save them as a draft before opening this timesheet.";
   el("historicalEditError").hidden = true;
@@ -742,8 +765,9 @@ function closeHistoricalEdit(cancelled = true) {
 function confirmHistoricalEdit() {
   const start = pendingHistoricalEdit;
   if (!start) return;
-  const end = C.addDays(start, 13);
-  const dates = Object.keys(state.records).filter(date => date >= start && date <= end).sort();
+  const context = periodContext(start);
+  if (context.requiresReview) { el("historicalEditError").textContent = "Submission identifiers need calendar review before editing."; el("historicalEditError").hidden = false; return; }
+  const dates = Object.keys(periodEntries(state.records, start)).sort();
   if (!dates.length) {
     closeHistoricalEdit(false);
     el("historicalEditStatus").textContent = "No saved records for this fortnight. Select another fortnight to edit.";
@@ -762,14 +786,14 @@ function confirmHistoricalEdit() {
   }
   let storageBaseline = null;
   const submittedPeriods = submittedPeriodsFor(start);
-  if (Object.keys(submittedPeriods).length) {
+  if (context.submitted) {
     try { storageBaseline = localStorage.getItem(STORAGE_KEY); }
     catch (error) { el("historicalEditError").textContent = `Stored data could not be checked: ${error.message}`; el("historicalEditError").hidden = false; return; }
   }
   closeHistoricalEdit(false);
   historicalEditStart = start;
   historicalEditAuthorization = {start, anchor:state.settings.fortnightStart, id:++historicalEditSequence};
-  if (Object.keys(submittedPeriods).length) {
+  if (context.submitted) {
     historicalSession = {start, id:historicalEditAuthorization.id, originalRecords:clone(periodEntries(state.records, start)), records:clone(periodEntries(state.records, start)), drafts:{}, touched:new Set(), originalSubmission:state.submissions[start] ? clone(state.submissions[start]) : null, originalSubmittedPeriods:clone(submittedPeriods), settings:clone(state.settings), storageBaseline};
   }
   // Opening an existing record does not change any stored record or submission status.
@@ -799,7 +823,8 @@ function loadRecord(date, force = false, mode = "new") {
   const locked = submittedPeriodLocked(date);
   activeDate = date; historicalMode = false; el("recordDate").value = date; renderRecordDate();
   const savedDraft = !locked && (mode === "new" || historicalRecord) ? historicalDraftFor(date) : null;
-  editMode = !locked && (mode === "edit" || historicalRecord || Boolean(savedDraft?.editMode && editableRecords()[date]));
+  const existingRecord = Boolean(editableRecords()[date]);
+  editMode = !locked && (mode === "edit" || historicalRecord || (savedDraft ? Boolean(savedDraft.editMode && existingRecord) : existingRecord));
   draft = locked ? clone(editableRecords()[date] || emptyRecord(state.settings.attendanceType)) : savedDraft ? clone(savedDraft.record) : editMode ? clone(editableRecords()[date]) : emptyRecord(state.settings.attendanceType); originalDraft = clone(draft);
   fillForm(draft); closeInterruptionEditor(); renderInterruptionList(); setLeaveToilExpanded(savedDraft ? savedDraft.leaveToilExpanded : (editMode || locked) && recordHasLeaveToil(draft)); renderAll();
   return true;
@@ -832,7 +857,7 @@ function nextAvailableRecordDate(date) {
   return nextDate;
 }
 function defaultRecordDate() {
-  const dates = [...Object.keys(state.records), ...Object.keys(state.drafts)].filter(date => /^\d{4}-\d{2}-\d{2}$/.test(date)).sort();
+  const dates = [...Object.keys(state.records), ...Object.keys(state.drafts)].filter(date => C.isValidISODate(date)).sort((a,b) => C.calendarDay(a) - C.calendarDay(b));
   if (dates.length) return nextAvailableRecordDate(dates.at(-1));
   let date = todayISO();
   while (isWeekendISO(date)) date = C.addDays(date, 1);
@@ -855,21 +880,14 @@ function commitRecordSubmission(submission) {
     loadRecord(date, true, "edit"); showStatus("Changes saved to the historical working draft. Resubmit to commit them."); return true;
   }
   if (!recordsEqual(state.records[date] || null, previous)) { alert("This record has changed since editing began. Reopen it before saving."); return false; }
-  const periodSubmission = validAnchor() ? state.submissions[periodFor(date).start] : null;
-  if (historicalEditStart && periodFor(date).start === historicalEditStart && periodSubmission?.submitted && !periodSubmission.changed && !recordsEqual(previous, candidateRecord)) {
-    if (!confirm("This fortnight was previously submitted. Saving this change will mark it as needing resubmission. Save changes and update its status?")) return;
-  }
   const previousDraft = state.drafts[date] ? clone(state.drafts[date]) : null;
   const previousActiveDraftDate = state.activeDraftDate;
-  const previousSubmissions = clone(state.submissions);
   state.records[date] = clone(candidateRecord);
   removeSavedDraft(date);
-  const submittedChanged = !recordsEqual(previous, candidateRecord) && flagSubmittedChange(date);
   if (!save()) {
     if (previous) state.records[date] = previous; else delete state.records[date];
     if (previousDraft) state.drafts[date] = previousDraft;
     state.activeDraftDate = previousActiveDraftDate;
-    state.submissions = previousSubmissions;
     return;
   }
   if (!wasEditMode && !existed) advanceToNextAvailableRecordDate();
@@ -877,7 +895,6 @@ function commitRecordSubmission(submission) {
     editMode = false; draft = emptyRecord(state.settings.attendanceType); originalDraft = clone(draft); fillForm(draft); closeInterruptionEditor(); renderInterruptionList(); setLeaveToilExpanded(false); renderAll();
   }
   showStatus(existed ? "Changes saved. Later balances have been recalculated." : "Record submitted and added to Timesheet History.");
-  if (submittedChanged) alert("This fortnight was previously submitted. The saved record has changed and the fortnight may need to be resubmitted.");
 }
 function guardWeekendSubmission(date, candidateRecord, submission) {
   if (!isWeekendISO(date) || !hasMeaningfulTimesheetData(candidateRecord)) return true;
@@ -991,24 +1008,10 @@ function deleteRecord(date) {
     else renderAll();
     showStatus("Record removed from the historical working draft. Resubmit to commit the deletion."); return;
   }
-  const previousSubmissions = clone(state.submissions);
-  const submittedChanged = flagSubmittedChange(date);
   const deleted = state.records[date]; delete state.records[date];
-  if (!save()) { state.records[date] = deleted; state.submissions = previousSubmissions; return; }
+  if (!save()) { state.records[date] = deleted; return; }
   if (date === activeDate) { editMode = false; draft = emptyRecord(state.settings.attendanceType); originalDraft = clone(draft); fillForm(draft); closeInterruptionEditor(); renderInterruptionList(); setLeaveToilExpanded(false); }
   renderAll(); showStatus("Record deleted. Later balances have been recalculated.");
-  if (submittedChanged) alert("This fortnight was previously submitted. A record was deleted and the fortnight may need to be resubmitted.");
-}
-
-function flagSubmittedChange(date) {
-  if (sessionContains(date)) return false;
-  if (!ensureRecordWritable(date)) return false;
-  if (!validAnchor()) return false;
-  const start = submittedPeriodStart(date) || C.fortnightFor(date, state.settings.fortnightStart).start;
-  const submission = state.submissions[start];
-  if (!submission?.submitted || submission.changed) return false;
-  submission.changed = true;
-  return true;
 }
 
 function renderAll() {
@@ -1072,25 +1075,26 @@ function metricList(id, entries) { el(id).innerHTML = entries.map(([label, value
 function renderFortnight(calc, records = editableRecords()) {
   const seniorOfficer = C.isSeniorOfficer(historicalMode ? state.settings.attendanceType : draft.attendanceType);
   if (!fortnightCalculationAllowed()) {
-    el("periodDates").textContent = "Invalid fortnight start date";
+    el("periodDates").textContent = storageReadError ? "Saved timesheet data needs review" : "Invalid fortnight start date";
     const label = seniorOfficer ? "SOG" : "Flex";
     metricList("fortnightResults", [["Standard Hours", null], ["Hours Recorded This Period", null], [`Opening ${label} Balance`, null], [`Net ${label} for the Period`, null], [`Closing ${label} Balance`, null], ["TOIL Balance", null]]);
     return;
   }
   const period = { start: viewStart, end: C.addDays(viewStart, 13) };
   let standard = 0, recorded = 0, netBalance = 0;
-  for (let current = period.start; current <= period.end; current = C.addDays(current, 1)) {
+  for (let offset = 0; offset < 14; offset++) {
+    const current = C.addDays(period.start, offset);
     standard += C.standardFor(current, state.settings);
     if (records[current]) { const day = calc[current]; if (day.daily != null) { recorded += day.daily; if (C.isSeniorOfficer(records[current].attendanceType) === seniorOfficer) netBalance += seniorOfficer ? day.dailySog : day.dailyFlex; } }
   }
-  const datesBefore = Object.keys(calc).filter(d => d < period.start).sort();
+  const datesBefore = Object.keys(calc).filter(d => C.calendarDay(d) < C.calendarDay(period.start)).sort((a,b) => C.calendarDay(a) - C.calendarDay(b));
   const carriedFlex = datesBefore.length ? calc[datesBefore.at(-1)].progressiveFlex : (C.parseDuration(state.settings.openingFlex) || 0);
-  const endDates = Object.keys(calc).filter(d => d <= period.end).sort();
+  const endDates = Object.keys(calc).filter(d => C.calendarDay(d) <= C.calendarDay(period.end)).sort((a,b) => C.calendarDay(a) - C.calendarDay(b));
   const endFlex = endDates.length ? calc[endDates.at(-1)].progressiveFlex : carriedFlex;
   const toil = endDates.length ? calc[endDates.at(-1)].progressiveToil : (C.parseDuration(state.settings.openingToil) || 0);
   el("periodDates").textContent = `${formatDisplayDate(period.start, "range")} to ${formatDisplayDate(period.end, "range")}`;
   if (seniorOfficer) {
-    const priorSogDates = Object.keys(calc).filter(d => d < period.start && calc[d].seniorOfficer).sort();
+    const priorSogDates = Object.keys(calc).filter(d => C.calendarDay(d) < C.calendarDay(period.start) && calc[d].seniorOfficer).sort((a,b) => C.calendarDay(a) - C.calendarDay(b));
     const openingSog = priorSogDates.length ? calc[priorSogDates.at(-1)].progressiveSog : 0;
     metricList("fortnightResults", [["Standard Hours", standard], ["Hours Recorded This Period", recorded], ["Opening SOG Balance", openingSog], ["Net SOG for the Period", netBalance], ["Closing SOG Balance", openingSog + netBalance], ["TOIL Balance", toil]]);
   } else metricList("fortnightResults", [["Standard Hours", standard], ["Hours Recorded This Period", recorded], ["Opening Flex Balance", carriedFlex], ["Net Flex for the Period", netBalance], ["Closing Flex Balance", endFlex], ["TOIL Balance", toil]]);
@@ -1101,12 +1105,12 @@ function renderRecords(calc) {
   el("dailyBalanceHeading").textContent = `Daily ${balanceLabel}`;
   el("progressiveBalanceHeading").textContent = `Progressive ${balanceLabel}`;
   const end = viewStart ? C.addDays(viewStart, 13) : "";
-  const dates = Object.keys(editableRecords()).filter(date => viewStart && date >= viewStart && date <= end).sort();
-  const hideActions = dates.length ? dates.every(date => submittedPeriodLocked(date)) : submittedPeriodLocked(viewStart);
+  const dates = Object.keys(periodEntries(editableRecords(), viewStart)).sort((a,b) => C.calendarDay(a) - C.calendarDay(b));
+  const hideActions = dates.length ? dates.every(date => !periodContext(date).canEditRecord) : !periodContext(viewStart).canEditRecord;
   el("recordActionsHeading").hidden = hideActions;
   el("recordsBody").innerHTML = dates.length ? dates.map(date => {
     const d = calc[date], senior = C.isSeniorOfficer(editableRecords()[date].attendanceType);
-    const actions = submittedPeriodLocked(date) ? "" : `<td class="row-actions"><button class="link-button" data-edit="${date}">Edit</button><button class="link-button danger" data-delete="${date}">Delete</button></td>`;
+    const actions = !periodContext(date).canEditRecord ? "" : `<td class="row-actions"><button class="link-button" data-edit="${date}">Edit</button><button class="link-button danger" data-delete="${date}">Delete</button></td>`;
     return `<tr data-record-date="${date}"><td>${formatDisplayDate(date)}</td><td>${d ? C.formatDuration(d.daily) || "Incomplete" : "—"}</td><td>${d ? C.formatDuration(senior ? d.dailySog : d.dailyFlex) || "—" : "—"}</td><td>${d ? C.formatDuration(senior ? d.progressiveSog : d.progressiveFlex) : "—"}</td><td>${d ? C.formatDuration(d.progressiveToil) : "—"}</td>${actions}</tr>`;
   }).join("") : `<tr><td colspan="${hideActions ? 5 : 6}" class="muted">No records yet.</td></tr>`;
   document.querySelectorAll("[data-edit], [data-delete]").forEach(button => {
@@ -1121,13 +1125,7 @@ function historicalResubmissionActive(start) {
   return Boolean(historicalSession?.start === start && historicalEditAllowed(start));
 }
 function fortnightStatusFor(start) {
-  if (!fortnightCalculationAllowed() || !start) return "Setup required";
-  if (historicalResubmissionActive(start)) return "To be submitted";
-  const submission = submissionForPeriod(start);
-  const currentStart = periodFor(todayISO()).start;
-  if (submission.submitted && !submission.changed) return "Submitted";
-  if (C.addDays(start, 13) < todayISO()) return "Overdue";
-  return start === currentStart ? "Current" : "Upcoming";
+  return selectedAnchorValid() ? periodContext(start).status : "Setup required";
 }
 function renderFortnightStatus() {
   for (const [id, start] of [["fortnightStatus", viewStart], ["dailyEntryStatus", periodFor(activeDate).start], ["calculatedDateStatus", periodFor(activeDate).start]]) {
@@ -1154,16 +1152,17 @@ function renderSubmissionReminder() {
   const previousStart = C.addDays(currentStart, -14);
   const starts = new Set(Object.keys(editableRecords()).map(date => C.fortnightFor(date, state.settings.fortnightStart).start));
   starts.add(currentStart); starts.add(previousStart);
-  Object.keys(state.submissions).forEach(start => starts.add(start));
-  const candidates = [...starts].map(start => ({ start, end: C.addDays(start, 13), submission: submissionForPeriod(start) })).filter(period => {
+  periodCalendar().periodIds().forEach(start => starts.add(start));
+  const candidates = [...starts].map(start => ({ start, end: C.addDays(start, 13), submission: submissionForPeriod(start), review:periodContext(start).requiresReview })).filter(period => {
+    if (period.review) return false;
     if (period.submission.changed) return true;
     if (period.submission.submitted) return false;
-    const hasRecords = Object.keys(editableRecords()).some(date => date >= period.start && date <= period.end);
-    return today === period.end || (today > period.end && (hasRecords || period.start === previousStart));
+    const hasRecords = Object.keys(periodEntries(editableRecords(), period.start)).length > 0;
+    return today === period.end || (C.calendarDay(today) > C.calendarDay(period.end) && (hasRecords || period.start === previousStart));
   }).sort((a, b) => {
     if (a.start === viewStart) return -1;
     if (b.start === viewStart) return 1;
-    return b.start.localeCompare(a.start);
+    return C.calendarDay(b.start) - C.calendarDay(a.start);
   });
   const period = candidates[0];
   if (!period) { box.hidden = true; setPrimaryLayoutState(false); return; }
@@ -1183,13 +1182,15 @@ function setPrimaryLayoutState(actionable) {
 function markFortnightSubmitted() {
   if (historicalSession) { if (reminderStart === historicalSession.start) resubmitHistoricalEdit(); else showStatus("Resubmit or Cancel the historical session before marking another period submitted.", true); return; }
   if (!reminderStart) return;
-  const submittedStart = reminderStart;
-  if (activeDate >= submittedStart && activeDate <= C.addDays(submittedStart, 13) && draftIsDirty()) {
+  const submittedStart = periodFor(reminderStart).start, context = periodContext(submittedStart);
+  if (context.storageConflict) { showStatus("Stored timesheets changed in another window. Your input is preserved; review or copy it before reloading. No data has been overwritten.", true); return; }
+  if (context.requiresReview || context.submitted) { showStatus("Use authorised Historical Edit Mode to resubmit an existing submitted fortnight, or review incompatible calendar identifiers first.", true); return; }
+  if (periodFor(activeDate).start === submittedStart && draftIsDirty()) {
     if (!confirm("Save the unsaved Daily Entry as a draft before marking this fortnight submitted?")) return;
     if (!saveDraft()) return;
   }
   const previousSubmission = state.submissions[submittedStart] ? clone(state.submissions[submittedStart]) : null;
-  state.submissions[submittedStart] = { submitted: true, changed: false, submittedAt: new Date().toISOString() };
+  state.submissions[submittedStart] = periodCalendar().stamp(submittedStart, previousSubmission || {}, new Date().toISOString());
   if (!save()) { if (previousSubmission) state.submissions[submittedStart] = previousSubmission; else delete state.submissions[submittedStart]; return; }
   if (historicalEditStart === submittedStart) revokeHistoricalEdit();
   if (submittedPeriodLocked()) loadRecord(activeDate, true); else renderAll();
@@ -1229,6 +1230,12 @@ function saveSettings() {
   const start = el("fortnightStart").value;
   if (!start) { const message = "Fortnight Start Date is required and must be a Thursday."; setSettingsStatus(message, true); alert(message); el("fortnightStart").focus(); return; }
   if (!C.isThursdayISO(start)) { const message = "Fortnight Start Date must be a Thursday."; setSettingsStatus(message, true); alert(message); el("fortnightStart").focus(); return; }
+  if (validAnchor() && !P.sameCalendar(start, state.settings.fortnightStart) && [state.records,state.drafts,state.submissions].some(data => Object.keys(data).length)) {
+    const proposed = P.createCalendar(state.submissions,start), needsReview = calendar => calendar.resolve(todayISO(),{today:todayISO()}).requiresReview || calendar.periodIds().some(id => calendar.resolve(id,{today:todayISO()}).requiresReview);
+    const verifiedRestore = Object.values(state.submissions).some(status => status?.submitted) && needsReview(periodCalendar()) && !needsReview(proposed);
+    if (!verifiedRestore) { setSettingsStatus("Existing timesheets use a different fortnight calendar. Keep the established calendar and review its identifiers before changing the reporting schedule.", true); return; }
+    if (!confirm("Restore the fortnight calendar identified by the saved submission IDs? This changes the saved anchor only; timesheet records and submission IDs will not be moved or rewritten.")) return;
+  }
   if (!validateDurationInputs("[data-setting-duration]")) { setSettingsStatus("Duration minutes must be between 00 and 59.", true); return; }
   const durationInputs = [
     ["Opening Flex Balance", el("openingFlex")], ["Opening TOIL Balance", el("openingToil")],
@@ -1237,7 +1244,8 @@ function saveSettings() {
   const invalid = durationInputs.find(([, input]) => C.parseDuration(input.value) == null);
   if (invalid) { const message = `${invalid[0]} must use H:MM format, for example 7:21.`; setSettingsStatus(message, true); alert(message); invalid[1].focus(); return; }
   const previousSettings = state.settings;
-  state.settings = JSON.parse(settingsSnapshot());
+  if (historicalEditStart && draftIsDirty() && !saveDraft()) { setSettingsStatus("Save or preserve the historical draft before changing settings.", true); return; }
+  state.settings = {...state.settings, ...JSON.parse(settingsSnapshot())};
   if (!save()) { state.settings = previousSettings; setSettingsStatus("Settings could not be saved to localStorage.", true); return; }
   if (historicalEditStart) { revokeHistoricalEdit(); loadRecord(activeDate, true); }
   if (!editMode && !submittedPeriodLocked()) { draft.attendanceType = state.settings.attendanceType; originalDraft.attendanceType = state.settings.attendanceType; updateLeaveTypeOptions(); }
@@ -1317,9 +1325,8 @@ function parseExportDate(value) {
   }
   if (!match) return null;
   const day = Number(match[1]), month = Number(match[2]), enteredYear = Number(match[3]), year = match[3].length === 2 ? 2000 + enteredYear : enteredYear;
-  const date = new Date(year, month - 1, day);
-  if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day) return null;
-  const iso = `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+  const iso = `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+  if (!C.isValidISODate(iso)) return null;
   return { iso, display:`${String(day).padStart(2, "0")} ${months[month - 1]} ${year}` };
 }
 function clearExportDateError(id) {
@@ -1340,9 +1347,9 @@ function normalizeExportDateField(id) {
 }
 function exportReportingPeriods(from, to) {
   const periods = [];
-  for (let start = periodFor(from).start; start <= to; start = C.addDays(start, 14)) {
+  for (let start = periodFor(from).start; C.calendarDay(start) <= C.calendarDay(to); start = C.addDays(start, 14)) {
     const end = C.addDays(start, 13);
-    if (Object.keys(state.records).some(date => date >= start && date <= end)) periods.push({ start, end, rows:buildCsvPackage(start).rows });
+    if (Object.keys(state.records).some(date => periodFor(date).start === start)) periods.push({ start, end, rows:buildCsvPackage(start).rows });
   }
   return periods;
 }
@@ -1370,7 +1377,7 @@ function exportMultiplePeriodsCsv(options = {}) {
   if (!ensureValidAnchor()) return "invalid";
   const from = normalizeExportDateField("exportPeriodFrom"), to = normalizeExportDateField("exportPeriodTo");
   if (!from || !to) { el("multiplePeriodExportStatus").textContent = "Enter valid From and To dates."; el("multiplePeriodExportStatus").classList.add("error"); return "invalid"; }
-  if (to.iso < from.iso) { el("exportPeriodToError").textContent = "Period To cannot be earlier than Period From."; el("exportPeriodToError").hidden = false; el("exportPeriodTo").setAttribute("aria-invalid", "true"); return "invalid-range"; }
+  if (C.calendarDay(to.iso) < C.calendarDay(from.iso)) { el("exportPeriodToError").textContent = "Period To cannot be earlier than Period From."; el("exportPeriodToError").hidden = false; el("exportPeriodTo").setAttribute("aria-invalid", "true"); return "invalid-range"; }
   el("exportPeriodToError").textContent = "Enter a valid date in DD MM YYYY format.";
   const periods = exportReportingPeriods(from.iso, to.iso);
   if (!periods.length) { el("multiplePeriodExportStatus").textContent = "No timesheet records found for this period."; el("multiplePeriodExportStatus").classList.add("error"); return "empty"; }
@@ -1447,7 +1454,8 @@ function prepareFeedback(options = {}) {
 buildUI(); renderSettings(); setSettingsExpanded(false); setHistoricalExpanded(false);
 loadRecord(activeDate, true);
 openWelcomeModal();
-if (!validAnchor() && !TEST_MODE) setTimeout(anchorReminder, 0);
+if (storageReadError) showStatus("Saved timesheet data could not be read safely. No data has been changed. Use the read-only diagnostic before saving.", true);
+if (!validAnchor() && !TEST_MODE && !storageReadError) setTimeout(anchorReminder, 0);
 if (TEST_MODE) {
   const testScript = document.createElement("script"); testScript.src = "test-ui-workflow.js"; document.body.append(testScript);
 }

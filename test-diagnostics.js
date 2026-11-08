@@ -1,0 +1,11 @@
+const assert = require("node:assert/strict"), vm = require("node:vm"), fs = require("node:fs"), C = require("./calculator.js");
+const source = fs.readFileSync(__dirname + "/diagnose-period.js","utf8");
+const fixture = {settings:{fortnightStart:"2026-09-24",private:"PRIVATE_SETTINGS"},records:{"2026-11-05":{name:"PRIVATE_NAME",startTime:"PRIVATE_HOURS"}},submissions:{"2026-10-23":{submitted:true,changed:false,note:"PRIVATE_NOTE"}}};
+const raw = JSON.stringify(fixture); let writes = 0;
+const context = {TimesheetCalc:C,localStorage:{getItem:()=>raw,setItem:()=>{writes++;},removeItem:()=>{writes++;},clear:()=>{writes++;}},document:{getElementById:id=>({value:id === "recordDate" ? "2026-11-05" : "2026-09-24",textContent:"Current"})},fetch:()=>{throw Error("Diagnostic attempted network access");}};
+const result = vm.runInNewContext(source,context);
+assert(result.readOnly); assert.equal(result.period.start,"2026-11-05"); assert.equal(result.canonicalSubmitted,false);
+assert.equal(result.legacySpillover[0].storedId,"2026-10-23"); assert.equal(writes,0); assert(!JSON.stringify(result).includes("PRIVATE")); assert.equal(JSON.stringify(fixture),raw);
+context.localStorage.getItem=()=>"PRIVATE_MALFORMED_JSON";
+assert(!JSON.stringify(vm.runInNewContext(source,context)).includes("PRIVATE"));
+console.log("PASS: diagnostic reads identifiers only, does not write or upload, and omits all record values and private metadata.");

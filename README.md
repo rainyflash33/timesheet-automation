@@ -28,13 +28,19 @@ For a submitted fortnight, Continue Editing creates an in-memory working session
 
 Daily Entry, Calculated for this date and Fortnight Summary reuse the same badge styling and status calculation for their displayed periods. During an authorised submitted historical session, the relevant badges show **To be submitted** without changing the saved submission status. The upper historical reminder and the Historical Timesheets action row both offer **Resubmit**, using the same handler with duplicate-execution protection. Cancel or successful resubmission restores **Submitted** and removes these historical controls; failures retain the pending status and working session. Ordinary submission reminders retain their existing deadline rules.
 
-Historical authorisation uses the selected calendar fortnight, including when an older release saved a submission start shifted by daylight saving. Those saved statuses are recognised without renaming or deleting them. Confirmation creates a scoped working session whenever the selected fortnight intersects a stored submitted range. Cancel preserves the exact stored snapshot. Resubmit writes only the selected fortnight's records and its current submission status, retaining legacy and unrelated submission metadata. Original submitted date ranges remain protected outside that authorisation.
+`periods.js` resolves submission status and permissions against the configured Thursday calendar for every badge, record handler and historical session. Calendar arithmetic uses civil days, independent of timezone and daylight saving. A recognised legacy start one day late is an alias for its canonical fortnight, not a second overlapping 14-day range. Reading existing storage does not rename, delete or rewrite submission IDs. Incompatible calendars or unrecognised IDs require review and block writes rather than guessing their meaning.
+
+Confirmation creates a working session only for the selected submitted fortnight. Cancel preserves the exact stored snapshot. Resubmit writes only that fortnight's records and canonical submission status, retaining legacy and unrelated metadata. Explicit submission/resubmission adds backward-compatible calendar provenance; there is no automatic data migration. Changing Settings to a different fortnight phase is blocked when history exists, except an explicitly confirmed restoration verified against the saved submission IDs.
+
+Each write checks that browser storage still matches the last loaded snapshot. Another window's changes refresh a clean form; unsaved input or an active historical session is retained and writes are blocked pending review. Unreadable saved data is left untouched and cannot be overwritten with empty defaults. The read-only diagnostic in `diagnose-period.js` reports nearby period IDs, status flags and badges, without record contents or network access. See [FORTNIGHT-AUDIT.md](FORTNIGHT-AUDIT.md) for findings and safe diagnostic instructions.
 
 ## Run the calculation tests
 
 With Node.js installed, run `node test-calculator.js` from this folder.
 
 Run `node test-service-worker.js` to verify that the offline shell includes the exact versioned assets referenced by the HTML. Browser workflow tests should run only with isolated test storage.
+
+Run `node test-periods.js` for complete 1990–2100 calendar/state boundary coverage, or `node test-periods.js --full` for every civil date in years 0001–9999 and both Thursday fortnight phases. Repeat with `TZ=Australia/Sydney` (or another timezone). Run `node test-period-handlers.js` for actual Save/Submit/Cancel Edit/Resubmit handlers at every 1990–2100 boundary, `node test-period-storage.js` for storage compatibility and preservation checks, and `node test-diagnostics.js` for diagnostic privacy and read-only checks. The browser `?test` suite also exercises consecutive boundaries throughout 2025–2027; run it only in a separate test browser profile/origin, never in a browser containing real Clocky records.
 
 ## Installed-app updates
 
