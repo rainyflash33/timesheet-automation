@@ -48,8 +48,8 @@
     assert(el("dailyBalanceHeading").textContent === "Daily Flex" && el("progressiveBalanceHeading").textContent === "Progressive Flex", "Flextime history headings are incorrect");
     assert(!document.querySelector(".danger-zone h3") && document.querySelector(".danger-zone-title").textContent === "Delete All Saved Timesheet Records", "reset section cosmetic title is incorrect");
     assert(getComputedStyle(document.querySelector(".danger-zone")).borderTopStyle !== "none", "reset section divider was removed");
-    assert(document.querySelector('script[src="app.js?v=clocky-release-v21"]'), "page is not loading the current summary presentation bundle");
-    assert(document.querySelector('link[href="styles.css?v=clocky-release-v21"]'), "page is not loading the current desktop/tablet summary stylesheet");
+    assert(document.querySelector('script[src="app.js?v=clocky-release-v22"]'), "page is not loading the current summary presentation bundle");
+    assert(document.querySelector('link[href="styles.css?v=clocky-release-v22"]'), "page is not loading the current desktop/tablet summary stylesheet");
     assert([...document.querySelectorAll(".history-filters > label")].map(control => control.childNodes[0].textContent.trim()).join("|") === "Year|Month|Fortnight", "Historical Timesheets selectors changed");
     assert([...document.querySelectorAll(".historical-actions button")].filter(button => !button.hidden).map(button => button.textContent.trim()).join("|") === "Edit Timesheet|Export", "historical actions must put Edit Timesheet before Export");
     assert(el("exportSelectedFortnight").classList.contains("secondary") && el("exportMultiplePeriods").classList.contains("secondary") && el("exportMultiplePeriods").textContent === "Export", "Historical Timesheets export actions do not share the secondary utility style or wording");
@@ -1067,6 +1067,106 @@
     const emptyPeriodState = JSON.stringify(state);
     el("editHistoricalTimesheet").click(); el("confirmHistoricalEdit").click();
     assert(!historicalSession && !historicalEditAuthorization && el("historicalEditStatus").textContent.includes("No saved records") && JSON.stringify(state) === emptyPeriodState, "empty historical period created records or granted permission");
+    // Saved submission IDs from the old DST calculation must not revoke or block
+    // authorisation for the selected current calendar fortnight.
+    const legacyRecord = {...emptyRecord("Flextime"), startTime:"09:00", lunchOut:"12:00", lunchIn:"13:00", finishTime:"17:00"};
+    const historicalIdCases = [
+      ["canonical", {"2026-10-08":{submitted:true,changed:false,note:"canonical"}}],
+      ["legacy only", {"2026-10-09":{submitted:true,changed:false,note:"legacy"}}],
+      ["legacy inserted first", {"2026-10-09":{submitted:true,changed:false,note:"legacy"}, "2026-10-08":{submitted:true,changed:false,note:"canonical"}}],
+      ["canonical inserted first", {"2026-10-08":{submitted:true,changed:false,note:"canonical"}, "2026-10-09":{submitted:true,changed:false,note:"legacy"}}]
+    ];
+    for (const [caseName, statuses] of historicalIdCases) {
+      revokeHistoricalEdit(); state = clone(defaults); state.settings.fortnightStart = "2026-09-24";
+      state.records = Object.fromEntries(["2026-10-08","2026-10-15","2026-10-16","2026-10-21","2026-10-22"].map(date => [date,clone(legacyRecord)]));
+      state.submissions = caseName === "legacy only" ? clone(statuses) : {...clone(statuses), "2026-10-23":{submitted:true,changed:false,note:"other period"}};
+      state.drafts = {"2026-11-06":{record:{...legacyRecord,startTime:"10:00"},editMode:false}}; state.activeDraftDate = "2026-11-06";
+      save(); renderSettings(); loadRecord("2026-10-15", true);
+      const originalState = JSON.stringify(state), originalStorage = localStorage.getItem(STORAGE_KEY), originalStateValue = clone(state);
+      assertPeriodBadges("Submitted");
+      assert(submittedPeriodLocked("2026-10-08"), `${caseName}: the canonical first date was left unprotected`);
+      if (caseName === "legacy only") assert(submittedPeriodLocked("2026-10-22") && !submittedPeriodLocked("2026-10-23"), "legacy stored-range protection was weakened or extended into unrelated unsubmitted dates");
+      assert(el("submittedWarningModal").hidden, `${caseName}: viewing a submitted date showed a warning`);
+      for (const trigger of ["saveDraft","submitRecord"]) {
+        el(trigger).click(); assert(!el("submittedWarningModal").hidden && localStorage.getItem(STORAGE_KEY) === originalStorage, `${caseName}: normal Save/Submit bypassed protection`); el("dismissSubmittedWarning").click();
+      }
+      authoriseHistoricalPeriod("2026-10-08");
+      const permissionId = historicalEditAuthorization.id;
+      assert(historicalSession?.start === "2026-10-08" && !submittedPeriodLocked() && !el("historicalSubmittedNotice").hidden, `${caseName}: confirmation did not create a submitted working session`);
+      assertPeriodBadges("To be submitted");
+      change("recordDate", "2026-10-15"); input("finishTime", "1730"); el("saveDraft").click();
+      assert(el("submittedWarningModal").hidden && historicalSession.records["2026-10-15"].finishTime === "17:30", `${caseName}: authorised Save was blocked`);
+      change("recordDate", "2026-10-16"); input("finishTime", "1800"); el("submitRecord").click();
+      assert(el("submittedWarningModal").hidden && historicalSession.records["2026-10-16"].finishTime === "18:00", `${caseName}: authorised Save Changes was blocked`);
+      renderAll(); renderAll(); loadRecord("2026-10-15", true, "edit");
+      assert(historicalEditAuthorization.id === permissionId && historicalEditAllowed(activeDate) && el("finishTime").value === "17:30", `${caseName}: date/form reload lost permission or the working draft`);
+      for (const [date, finish] of [["2026-10-08","17:15"],["2026-10-21","17:45"]]) {
+        change("recordDate", date); input("finishTime", finish); el("submitRecord").click();
+        assert(el("submittedWarningModal").hidden && historicalSession.records[date].finishTime === finish, `${caseName}: selected-period boundary date was not editable`);
+      }
+      assert(JSON.stringify(state) === originalState && localStorage.getItem(STORAGE_KEY) === originalStorage, `${caseName}: historical Save/Save Changes modified the submitted snapshot`);
+      assert(!historicalEditAllowed("2026-10-22") && !ensureRecordWritable("2026-10-22"), `${caseName}: permission extended to another submitted fortnight`);
+      deleteRecord("2026-10-22");
+      assert(state.records["2026-10-22"] && localStorage.getItem(STORAGE_KEY) === originalStorage, `${caseName}: another submitted fortnight was modified`);
+      el("cancelHistoricalSession").click(); el("keepHistoricalChanges").click();
+      assert(historicalEditAuthorization.id === permissionId && historicalSession.records["2026-10-15"].finishTime === "17:30", `${caseName}: Keep Editing discarded permission or draft`);
+      el("cancelHistoricalSession").click(); el("discardHistoricalChanges").click();
+      assert(!historicalSession && !historicalEditAuthorization && JSON.stringify(state) === originalState && localStorage.getItem(STORAGE_KEY) === originalStorage, `${caseName}: Cancel failed to restore the exact submitted snapshot`);
+      assertPeriodBadges("Submitted");
+      el("saveDraft").click(); assert(!el("submittedWarningModal").hidden, `${caseName}: Cancel did not restore the warning`); el("dismissSubmittedWarning").click();
+      authoriseHistoricalPeriod("2026-10-08"); input("finishTime", "1731"); el("saveDraft").click();
+      change("recordDate", "2026-10-22");
+      assert(!el("historicalDiscardModal").hidden && !historicalEditAllowed("2026-10-22"), `${caseName}: switching periods transferred permission`);
+      el("discardHistoricalChanges").click();
+      assert(activeDate === "2026-10-22" && !historicalSession && submittedPeriodLocked(), `${caseName}: another submitted fortnight was not relocked`);
+      for (const trigger of ["saveDraft","submitRecord"]) { el(trigger).click(); assert(!el("submittedWarningModal").hidden, `${caseName}: switched period bypassed protection`); el("dismissSubmittedWarning").click(); }
+      assert(localStorage.getItem(STORAGE_KEY) === originalStorage, `${caseName}: cancellation or navigation changed storage`);
+      authoriseHistoricalPeriod("2026-10-08"); change("recordDate", "2026-10-15"); input("finishTime", "1800"); el("submitRecord").click();
+      const resubmitId = historicalEditAuthorization.id, beforeResubmit = C.recalculate(state.records, state.settings)["2026-10-21"].progressiveFlex;
+      if (caseName === "legacy only") {
+        const legacySetItem = Storage.prototype.setItem;
+        Storage.prototype.setItem = function(key,value) { if (key === STORAGE_KEY) throw new DOMException("Isolated legacy resubmission failure", "QuotaExceededError"); return legacySetItem.call(this,key,value); };
+        try { el("resubmitHistoricalReminder").click(); } finally { Storage.prototype.setItem = legacySetItem; }
+        assert(historicalSession && historicalEditAllowed(activeDate) && historicalSession.records[activeDate].finishTime === "18:00" && JSON.stringify(state) === originalState && localStorage.getItem(STORAGE_KEY) === originalStorage, "failed legacy resubmission lost the working draft, snapshot or permission");
+        const legacyNote = state.submissions["2026-10-09"].note;
+        state.submissions["2026-10-09"].note = "changed during editing";
+        el("resubmitHistoricalReminder").click();
+        assert(historicalSession && el("status").textContent.includes("changed after editing began") && localStorage.getItem(STORAGE_KEY) === originalStorage, "changed legacy submission metadata bypassed the transaction conflict guard");
+        state.submissions["2026-10-09"].note = legacyNote;
+        assertPeriodBadges("To be submitted");
+      }
+      const originalSet = Storage.prototype.setItem; let resubmitWrites = 0;
+      Storage.prototype.setItem = function(key,value) { if (key === STORAGE_KEY) resubmitWrites++; return originalSet.call(this,key,value); };
+      try { el(caseName === "legacy only" ? "resubmitHistoricalReminder" : "resubmitHistoricalTimesheet").click(); } finally { Storage.prototype.setItem = originalSet; }
+      assert(resubmitWrites === 1 && !historicalSession && !historicalEditAuthorization && state.records["2026-10-15"].finishTime === "18:00", `${caseName}: Resubmit failed to commit and relock atomically`);
+      assert(state.submissions["2026-10-08"].submitted && !state.submissions["2026-10-08"].changed && C.recalculate(state.records,state.settings)["2026-10-21"].progressiveFlex === beforeResubmit + 60, `${caseName}: resubmission status or recalculated balance is wrong`);
+      for (const key of Object.keys(originalStateValue.submissions).filter(key => key !== "2026-10-08")) assert(recordsEqual(state.submissions[key],originalStateValue.submissions[key]), `${caseName}: unrelated/legacy submission metadata changed`);
+      assert(recordsEqual(state.records["2026-10-22"],originalStateValue.records["2026-10-22"]) && recordsEqual(state.drafts,originalStateValue.drafts) && recordsEqual(state.settings,originalStateValue.settings), `${caseName}: unrelated records, saved drafts or settings changed`);
+      assertPeriodBadges("Submitted");
+      const committedStorage = localStorage.getItem(STORAGE_KEY);
+      for (const trigger of ["saveDraft","submitRecord"]) { el(trigger).click(); assert(!el("submittedWarningModal").hidden && localStorage.getItem(STORAGE_KEY) === committedStorage, `${caseName}: normal writes were allowed after Resubmit`); el("dismissSubmittedWarning").click(); }
+      loadRecord("2026-11-09", true);
+      assert(!commitRecordSubmission({date:activeDate,candidateRecord:clone(legacyRecord),previous:null,existed:false,wasEditMode:false,historicalAuthorization:resubmitId}) && localStorage.getItem(STORAGE_KEY) === committedStorage, `${caseName}: a revoked historical token committed a stale entry`);
+      input("startTime", "0900"); el("saveDraft").click();
+      assert(el("submittedWarningModal").hidden && state.drafts["2026-11-09"].record.startTime === "09:00", `${caseName}: an unsubmitted draft was blocked`);
+      input("lunchOut", "1200"); input("lunchIn", "1300"); input("finishTime", "1700"); el("submitRecord").click();
+      assert(el("submittedWarningModal").hidden && state.records["2026-11-09"].finishTime === "17:00", `${caseName}: an unsubmitted record was blocked`);
+    }
+    // A shifted preceding range can protect only the first date of the selected
+    // calendar fortnight; its raw key must still create a working transaction.
+    revokeHistoricalEdit(); state = clone(defaults); state.settings.fortnightStart = "2026-09-24";
+    state.records = {"2026-10-08":clone(legacyRecord), "2026-10-15":clone(legacyRecord)};
+    state.submissions = {"2026-09-25":{submitted:true,changed:false,note:"preceding legacy range"}};
+    save(); renderSettings(); loadRecord("2026-10-08", true);
+    const precedingSnapshot = JSON.stringify(state), precedingStored = localStorage.getItem(STORAGE_KEY);
+    assert(submittedPeriodLocked() && !submittedPeriodLocked("2026-10-15"), "legacy boundary fixture does not preserve its original protected dates");
+    el("saveDraft").click(); assert(!el("submittedWarningModal").hidden, "preceding submitted range allowed an ordinary write"); el("dismissSubmittedWarning").click();
+    authoriseHistoricalPeriod("2026-10-08"); input("finishTime", "1730"); el("submitRecord").click();
+    assert(historicalSession && historicalEditAllowed(activeDate) && el("submittedWarningModal").hidden && historicalSession.records["2026-10-08"].finishTime === "17:30", "overlapping preceding range blocked authorised Save Changes");
+    change("recordDate", "2026-10-15"); input("finishTime", "1800"); el("saveDraft").click();
+    assert(historicalSession && historicalEditAllowed(activeDate) && historicalSession.records["2026-10-15"].finishTime === "18:00" && JSON.stringify(state) === precedingSnapshot && localStorage.getItem(STORAGE_KEY) === precedingStored, "mixed submitted/unsubmitted dates escaped the selected historical transaction");
+    el("cancelHistoricalSession").click(); el("discardHistoricalChanges").click();
+    assert(!historicalSession && JSON.stringify(state) === precedingSnapshot && localStorage.getItem(STORAGE_KEY) === precedingStored && submittedPeriodLocked("2026-10-08") && !submittedPeriodLocked("2026-10-15"), "Cancel changed the preceding snapshot or unrelated unsubmitted-date permissions");
     // Footer copy is local-storage verified, pure white and high contrast over the existing background.
     const privacy = document.querySelector(".privacy-disclaimer"), privacyBody = privacy.querySelector("p");
     assert(privacy.nextElementSibling.classList.contains("feedback-entry") && privacy.parentElement.tagName === "FOOTER" && privacy.querySelector("h2").textContent === "Privacy & Data Storage", "Feedback is not directly below the privacy disclaimer");

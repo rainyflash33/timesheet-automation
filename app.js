@@ -577,7 +577,7 @@ function commitHistoricalResubmission(session, confirmation) {
     if (details) { queueRecordConfirmation(submission, details); return false; }
   }
   try {
-    if (localStorage.getItem(STORAGE_KEY) !== session.storageBaseline || !recordsEqual(state.settings, session.settings) || !recordsEqual(periodEntries(state.records, session.start), session.originalRecords) || !recordsEqual(state.submissions[session.start], session.originalSubmission)) {
+    if (localStorage.getItem(STORAGE_KEY) !== session.storageBaseline || !recordsEqual(state.settings, session.settings) || !recordsEqual(periodEntries(state.records, session.start), session.originalRecords) || !recordsEqual(state.submissions[session.start] || null, session.originalSubmission) || !recordsEqual(submittedPeriodsFor(session.start), session.originalSubmittedPeriods)) {
       showStatus("Stored timesheet data changed after editing began. Keep a copy of your working changes, then cancel and reopen the timesheet before resubmitting.", true); return false;
     }
   } catch (error) { showStatus(`Stored timesheet data could not be checked: ${error.message}`, true); return false; }
@@ -593,7 +593,24 @@ function commitHistoricalResubmission(session, confirmation) {
   showStatus("Historical timesheet resubmitted successfully. Changes saved and the fortnight is locked.");
   return true;
 }
+function submittedPeriodsFor(start) {
+  const end = C.addDays(start, 13);
+  return Object.fromEntries(Object.entries(state.submissions).filter(([storedStart, status]) => /^\d{4}-\d{2}-\d{2}$/.test(storedStart) && status?.submitted && storedStart <= end && C.addDays(storedStart, 13) >= start));
+}
+function submissionForPeriod(start) {
+  const exact = state.submissions[start];
+  if (exact?.submitted || !validAnchor()) return exact || {};
+  // Older releases stored starts shifted by DST. Read them using the current
+  // calendar period without migrating or deleting any saved submission status.
+  const legacy = Object.entries(state.submissions).find(([storedStart, status]) => /^\d{4}-\d{2}-\d{2}$/.test(storedStart) && status?.submitted && periodFor(storedStart).start === start);
+  return legacy?.[1] || exact || {};
+}
 function submittedPeriodStart(date) {
+  if (validAnchor() && /^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    const start = periodFor(date).start;
+    if (submissionForPeriod(start).submitted) return start;
+  }
+  // Preserve protection for every date in an original stored submitted range.
   return Object.keys(state.submissions).find(start => /^\d{4}-\d{2}-\d{2}$/.test(start) && state.submissions[start]?.submitted && date >= start && date <= C.addDays(start, 13)) || "";
 }
 function historicalEditAllowed(date) {
@@ -601,8 +618,7 @@ function historicalEditAllowed(date) {
   return Boolean(permission && historicalEditStart === permission.start && permission.anchor === state.settings.fortnightStart && validAnchor() && periodFor(date).start === permission.start && (!submittedPeriodStart(date) || (historicalSession && historicalSession.id === permission.id && historicalSession.start === permission.start)));
 }
 function submittedPeriodLocked(date = activeDate) {
-  const start = submittedPeriodStart(date);
-  return Boolean(start && !(historicalEditAllowed(date) && historicalEditStart === start));
+  return Boolean(submittedPeriodStart(date) && !historicalEditAllowed(date));
 }
 function ensureRecordWritable(date) {
   if (historicalSession && !sessionContains(date)) return false;
@@ -710,7 +726,7 @@ function openHistoricalEdit() {
   }
   if (!ensureValidAnchor()) return;
   pendingHistoricalEdit = historicalStart;
-  el("historicalSubmittedNotice").hidden = !state.submissions[historicalStart]?.submitted;
+  el("historicalSubmittedNotice").hidden = !Object.keys(submittedPeriodsFor(historicalStart)).length;
   el("historicalDraftNotice").hidden = !draftIsDirty();
   el("historicalDraftNotice").textContent = submittedPeriodLocked() ? "Your temporary Daily Entry changes will remain in the form. They will not be saved until you explicitly save them in authorised historical editing." : "Your Daily Entry has unsaved changes. Continue Editing will save them as a draft before opening this timesheet.";
   el("historicalEditError").hidden = true;
@@ -745,15 +761,16 @@ function confirmHistoricalEdit() {
     return;
   }
   let storageBaseline = null;
-  if (state.submissions[start]?.submitted) {
+  const submittedPeriods = submittedPeriodsFor(start);
+  if (Object.keys(submittedPeriods).length) {
     try { storageBaseline = localStorage.getItem(STORAGE_KEY); }
     catch (error) { el("historicalEditError").textContent = `Stored data could not be checked: ${error.message}`; el("historicalEditError").hidden = false; return; }
   }
   closeHistoricalEdit(false);
   historicalEditStart = start;
   historicalEditAuthorization = {start, anchor:state.settings.fortnightStart, id:++historicalEditSequence};
-  if (state.submissions[start]?.submitted) {
-    historicalSession = {start, id:historicalEditAuthorization.id, originalRecords:clone(periodEntries(state.records, start)), records:clone(periodEntries(state.records, start)), drafts:{}, touched:new Set(), originalSubmission:clone(state.submissions[start]), settings:clone(state.settings), storageBaseline};
+  if (Object.keys(submittedPeriods).length) {
+    historicalSession = {start, id:historicalEditAuthorization.id, originalRecords:clone(periodEntries(state.records, start)), records:clone(periodEntries(state.records, start)), drafts:{}, touched:new Set(), originalSubmission:state.submissions[start] ? clone(state.submissions[start]) : null, originalSubmittedPeriods:clone(submittedPeriods), settings:clone(state.settings), storageBaseline};
   }
   // Opening an existing record does not change any stored record or submission status.
   if (continuingSubmittedChanges) {
@@ -830,6 +847,7 @@ function advanceToNextAvailableRecordDate() {
 function commitRecordSubmission(submission) {
   const { date, candidateRecord, previous, existed, wasEditMode } = submission;
   if (date !== activeDate || !ensureRecordWritable(date)) return false;
+  if (submission.historicalAuthorization != null && submission.historicalAuthorization !== historicalEditAuthorization?.id) return false;
   if (submittedPeriodStart(date) && submission.historicalAuthorization !== historicalEditAuthorization?.id) return false;
   if (historicalSession && sessionContains(date) && historicalEditAllowed(date)) {
     if (submission.historicalAuthorization !== historicalEditAuthorization.id || !recordsEqual(editableRecords()[date] || null, previous)) return false;
@@ -1105,7 +1123,7 @@ function historicalResubmissionActive(start) {
 function fortnightStatusFor(start) {
   if (!fortnightCalculationAllowed() || !start) return "Setup required";
   if (historicalResubmissionActive(start)) return "To be submitted";
-  const submission = state.submissions[start] || {};
+  const submission = submissionForPeriod(start);
   const currentStart = periodFor(todayISO()).start;
   if (submission.submitted && !submission.changed) return "Submitted";
   if (C.addDays(start, 13) < todayISO()) return "Overdue";
@@ -1137,7 +1155,7 @@ function renderSubmissionReminder() {
   const starts = new Set(Object.keys(editableRecords()).map(date => C.fortnightFor(date, state.settings.fortnightStart).start));
   starts.add(currentStart); starts.add(previousStart);
   Object.keys(state.submissions).forEach(start => starts.add(start));
-  const candidates = [...starts].map(start => ({ start, end: C.addDays(start, 13), submission: state.submissions[start] || {} })).filter(period => {
+  const candidates = [...starts].map(start => ({ start, end: C.addDays(start, 13), submission: submissionForPeriod(start) })).filter(period => {
     if (period.submission.changed) return true;
     if (period.submission.submitted) return false;
     const hasRecords = Object.keys(editableRecords()).some(date => date >= period.start && date <= period.end);

@@ -28,6 +28,8 @@ For a submitted fortnight, Continue Editing creates an in-memory working session
 
 Daily Entry, Calculated for this date and Fortnight Summary reuse the same badge styling and status calculation for their displayed periods. During an authorised submitted historical session, the relevant badges show **To be submitted** without changing the saved submission status. The upper historical reminder and the Historical Timesheets action row both offer **Resubmit**, using the same handler with duplicate-execution protection. Cancel or successful resubmission restores **Submitted** and removes these historical controls; failures retain the pending status and working session. Ordinary submission reminders retain their existing deadline rules.
 
+Historical authorisation uses the selected calendar fortnight, including when an older release saved a submission start shifted by daylight saving. Those saved statuses are recognised without renaming or deleting them. Confirmation creates a scoped working session whenever the selected fortnight intersects a stored submitted range. Cancel preserves the exact stored snapshot. Resubmit writes only the selected fortnight's records and its current submission status, retaining legacy and unrelated submission metadata. Original submitted date ranges remain protected outside that authorisation.
+
 ## Run the calculation tests
 
 With Node.js installed, run `node test-calculator.js` from this folder.
